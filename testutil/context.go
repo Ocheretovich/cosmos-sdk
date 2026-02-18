@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/stretchr/testify/assert"
 
-	"cosmossdk.io/core/header"
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"cosmossdk.io/store"
 	"cosmossdk.io/store/metrics"
 	storetypes "cosmossdk.io/store/types"
@@ -26,7 +26,7 @@ func DefaultContext(key, tkey storetypes.StoreKey) sdk.Context {
 	if err != nil {
 		panic(err)
 	}
-	ctx := sdk.NewContext(cms, false, log.NewNopLogger())
+	ctx := sdk.NewContext(cms, cmtproto.Header{}, false, log.NewNopLogger())
 
 	return ctx
 }
@@ -58,12 +58,12 @@ func DefaultContextWithKeys(
 		panic(err)
 	}
 
-	return sdk.NewContext(cms, false, log.NewNopLogger())
+	return sdk.NewContext(cms, cmtproto.Header{}, false, log.NewNopLogger())
 }
 
 type TestContext struct {
 	Ctx sdk.Context
-	DB  *dbm.MemDB
+	DB  dbm.DB
 	CMS store.CommitMultiStore
 }
 
@@ -76,7 +76,22 @@ func DefaultContextWithDB(tb testing.TB, key, tkey storetypes.StoreKey) TestCont
 	err := cms.LoadLatestVersion()
 	assert.NoError(tb, err)
 
-	ctx := sdk.NewContext(cms, false, log.NewNopLogger()).WithHeaderInfo(header.Info{Time: time.Now()})
+	ctx := sdk.NewContext(cms, cmtproto.Header{Time: time.Now()}, false, log.NewNopLogger())
+
+	return TestContext{ctx, db, cms}
+}
+
+func DefaultContextWithObjectStore(tb testing.TB, key, tkey, okey storetypes.StoreKey) TestContext {
+	tb.Helper()
+	db := dbm.NewMemDB()
+	cms := store.NewCommitMultiStore(db, log.NewNopLogger(), metrics.NewNoOpMetrics())
+	cms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, db)
+	cms.MountStoreWithDB(tkey, storetypes.StoreTypeTransient, db)
+	cms.MountStoreWithDB(okey, storetypes.StoreTypeObject, db)
+	err := cms.LoadLatestVersion()
+	assert.NoError(tb, err)
+
+	ctx := sdk.NewContext(cms, cmtproto.Header{Time: time.Now()}, false, log.NewNopLogger())
 
 	return TestContext{ctx, db, cms}
 }

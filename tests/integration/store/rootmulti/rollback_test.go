@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"testing"
 
-	abci "github.com/cometbft/cometbft/api/cometbft/abci/v1"
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
+	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	dbm "github.com/cosmos/cosmos-db"
+	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"cosmossdk.io/simapp"
 
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
@@ -31,19 +32,19 @@ func TestRollback(t *testing.T) {
 			AppHash: app.LastCommitID().Hash,
 		}
 
-		_, err := app.FinalizeBlock(&abci.FinalizeBlockRequest{
+		_, err := app.FinalizeBlock(&abci.RequestFinalizeBlock{
 			Height: header.Height,
 		})
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		ctx := app.NewContextLegacy(false, header)
 		store := ctx.KVStore(app.GetKey("bank"))
 		store.Set([]byte("key"), []byte(fmt.Sprintf("value%d", i)))
-		_, err = app.FinalizeBlock(&abci.FinalizeBlockRequest{
+		_, err = app.FinalizeBlock(&abci.RequestFinalizeBlock{
 			Height: header.Height,
 		})
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		_, err = app.Commit()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}
 
 	assert.Equal(t, ver0+10, app.LastBlockHeight())
@@ -66,17 +67,17 @@ func TestRollback(t *testing.T) {
 			Height:  ver0 + i,
 			AppHash: app.LastCommitID().Hash,
 		}
-		_, err := app.FinalizeBlock(&abci.FinalizeBlockRequest{Height: header.Height})
-		assert.NilError(t, err)
+		_, err := app.FinalizeBlock(&abci.RequestFinalizeBlock{Height: header.Height})
+		require.NoError(t, err)
 		ctx := app.NewContextLegacy(false, header)
 		store := ctx.KVStore(app.GetKey("bank"))
 		store.Set([]byte("key"), []byte(fmt.Sprintf("VALUE%d", i)))
-		_, err = app.FinalizeBlock(&abci.FinalizeBlockRequest{
+		_, err = app.FinalizeBlock(&abci.RequestFinalizeBlock{
 			Height: header.Height,
 		})
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		_, err = app.Commit()
-		assert.NilError(t, err)
+		require.NoError(t, err)
 	}
 
 	assert.Equal(t, ver0+10, app.LastBlockHeight())

@@ -2,18 +2,18 @@ package epochs
 
 import (
 	"fmt"
-	"sort"
-
-	"golang.org/x/exp/maps"
+	"maps"
+	"slices"
 
 	modulev1 "cosmossdk.io/api/cosmos/epochs/module/v1"
 	"cosmossdk.io/core/appmodule"
+	"cosmossdk.io/core/store"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/depinject/appconfig"
-	"cosmossdk.io/x/epochs/keeper"
-	"cosmossdk.io/x/epochs/types"
 
 	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/x/epochs/keeper"
+	"github.com/cosmos/cosmos-sdk/x/epochs/types"
 )
 
 var _ depinject.OnePerModuleType = AppModule{}
@@ -31,9 +31,9 @@ func init() {
 type ModuleInputs struct {
 	depinject.In
 
-	Config      *modulev1.Module
-	Cdc         codec.Codec
-	Environment appmodule.Environment
+	Config       *modulev1.Module
+	Cdc          codec.Codec
+	StoreService store.KVStoreService
 }
 
 type ModuleOutputs struct {
@@ -44,24 +44,21 @@ type ModuleOutputs struct {
 }
 
 func ProvideModule(in ModuleInputs) ModuleOutputs {
-	k := keeper.NewKeeper(in.Environment, in.Cdc)
-	m := NewAppModule(in.Cdc, k)
-	return ModuleOutputs{EpochKeeper: k, Module: m}
+	k := keeper.NewKeeper(in.StoreService, in.Cdc)
+	m := NewAppModule(&k)
+	return ModuleOutputs{EpochKeeper: m.keeper, Module: m}
 }
 
 func InvokeSetHooks(keeper *keeper.Keeper, hooks map[string]types.EpochHooksWrapper) error {
-	if hooks == nil {
+	if keeper == nil || hooks == nil {
 		return nil
 	}
 
 	// Default ordering is lexical by module name.
 	// Explicit ordering can be added to the module config if required.
-	modNames := maps.Keys(hooks)
-	order := modNames
-	sort.Strings(order)
-
+	modNames := slices.Sorted(maps.Keys(hooks))
 	var multiHooks types.MultiEpochHooks
-	for _, modName := range order {
+	for _, modName := range modNames {
 		hook, ok := hooks[modName]
 		if !ok {
 			return fmt.Errorf("can't find epoch hooks for module %s", modName)

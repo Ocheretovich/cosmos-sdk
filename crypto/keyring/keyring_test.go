@@ -75,7 +75,7 @@ func TestNewKeyring(t *testing.T) {
 			dir:         t.TempDir(),
 			userInput:   strings.NewReader(""),
 			cdc:         cdc,
-			expectedErr: ErrUnknownBacked,
+			expectedErr: ErrUnknownBackend,
 		},
 	}
 	for _, tt := range tests {
@@ -891,35 +891,35 @@ func TestImportPubKey(t *testing.T) {
 		uid         string
 		backend     string
 		armor       string
-		expectedErr string
+		expectedErr error
 	}{
 		{
 			name:        "correct import",
 			uid:         "correctTest",
 			backend:     BackendTest,
 			armor:       "-----BEGIN TENDERMINT PUBLIC KEY-----\nversion: 0.0.1\ntype: secp256k1\n\nCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQOlcgxiZM4cR0LA\nwum483+L6zRnXC6zEKtQ4FEa6z0VrA==\n=CqBG\n-----END TENDERMINT PUBLIC KEY-----",
-			expectedErr: "",
+			expectedErr: nil,
 		},
 		{
 			name:        "modified armor",
 			uid:         "modified",
 			backend:     BackendTest,
 			armor:       "-----BEGIN TENDERMINT PUBLIC KEY-----\nversion: 0.0.1\ntype: secp256k1\n\nCh8vY29zbW8zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQOlcgxiZM4cR0LA\nwum483+L6zRnXC6zEKtQ4FEa6z0VrA==\n=CqBG\n-----END TENDERMINT PUBLIC KEY-----",
-			expectedErr: "couldn't unarmor bytes: openpgp: invalid data: armor invalid",
+			expectedErr: fmt.Errorf("couldn't unarmor bytes: openpgp: invalid data: armor invalid"),
 		},
 		{
 			name:        "empty armor",
 			uid:         "empty",
 			backend:     BackendTest,
 			armor:       "",
-			expectedErr: "couldn't unarmor bytes: EOF",
+			expectedErr: fmt.Errorf("couldn't unarmor bytes: EOF"),
 		},
 		{
 			name:        "correct in memory import",
 			uid:         "inMemory",
 			backend:     BackendMemory,
 			armor:       "-----BEGIN TENDERMINT PUBLIC KEY-----\nversion: 0.0.1\ntype: secp256k1\n\nCh8vY29zbW9zLmNyeXB0by5zZWNwMjU2azEuUHViS2V5EiMKIQOlcgxiZM4cR0LA\nwum483+L6zRnXC6zEKtQ4FEa6z0VrA==\n=CqBG\n-----END TENDERMINT PUBLIC KEY-----",
-			expectedErr: "",
+			expectedErr: nil,
 		},
 	}
 	for _, tt := range tests {
@@ -927,10 +927,11 @@ func TestImportPubKey(t *testing.T) {
 			kb, err := New("keybasename", tt.backend, t.TempDir(), nil, cdc)
 			require.NoError(t, err)
 			err = kb.ImportPubKey(tt.uid, tt.armor)
-			if tt.expectedErr == "" {
+			if tt.expectedErr == nil {
 				require.NoError(t, err)
 			} else {
-				require.ErrorContains(t, err, tt.expectedErr)
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.expectedErr.Error())
 			}
 		})
 	}
@@ -1119,7 +1120,7 @@ func TestNewAccount(t *testing.T) {
 			bip39Passphrease: "",
 			algo:             hd.Secp256k1,
 			mnemonic:         "fresh enact fresh ski large bicycle marine abandon motor end pact mixture annual elite bind fan write warrior adapt common manual cool happy dutch",
-			expectedErr:      errors.New("invalid byte at position"),
+			expectedErr:      fmt.Errorf("Invalid byte at position"),
 		},
 		{
 			name:             "in memory invalid mnemonic",
@@ -1129,7 +1130,7 @@ func TestNewAccount(t *testing.T) {
 			bip39Passphrease: "",
 			algo:             hd.Secp256k1,
 			mnemonic:         "malarkey pair crucial catch public canyon evil outer stage ten gym tornado",
-			expectedErr:      errors.New("invalid mnemonic"),
+			expectedErr:      fmt.Errorf("Invalid mnemonic"),
 		},
 	}
 	for _, tt := range tests {
@@ -1513,14 +1514,14 @@ func TestAltKeyring_KeyByAddress(t *testing.T) {
 		name        string
 		backend     string
 		uid         string
-		getAddres   func(*Record) (sdk.AccAddress, error)
+		getAddress  func(*Record) (sdk.AccAddress, error)
 		expectedErr error
 	}{
 		{
 			name:    "correct get",
 			backend: BackendTest,
 			uid:     "okTest",
-			getAddres: func(k *Record) (sdk.AccAddress, error) {
+			getAddress: func(k *Record) (sdk.AccAddress, error) {
 				return k.GetAddress()
 			},
 			expectedErr: nil,
@@ -1529,7 +1530,7 @@ func TestAltKeyring_KeyByAddress(t *testing.T) {
 			name:    "not found key",
 			backend: BackendTest,
 			uid:     "notFoundUid",
-			getAddres: func(k *Record) (sdk.AccAddress, error) {
+			getAddress: func(k *Record) (sdk.AccAddress, error) {
 				return nil, nil
 			},
 			expectedErr: sdkerrors.ErrKeyNotFound,
@@ -1542,7 +1543,7 @@ func TestAltKeyring_KeyByAddress(t *testing.T) {
 
 			mnemonic, _, err := kr.NewMnemonic(tt.uid, English, sdk.FullFundraiserPath, DefaultBIP39Passphrase, hd.Secp256k1)
 			require.NoError(t, err)
-			addr, err := tt.getAddres(mnemonic)
+			addr, err := tt.getAddress(mnemonic)
 			require.NoError(t, err)
 
 			key, err := kr.KeyByAddress(addr)
@@ -1628,14 +1629,14 @@ func TestAltKeyring_DeleteByAddress(t *testing.T) {
 		name        string
 		backend     string
 		uid         string
-		getAddres   func(*Record) (sdk.AccAddress, error)
+		getAddress  func(*Record) (sdk.AccAddress, error)
 		expectedErr error
 	}{
 		{
 			name:    "correct delete",
 			backend: BackendTest,
 			uid:     "okTest",
-			getAddres: func(k *Record) (sdk.AccAddress, error) {
+			getAddress: func(k *Record) (sdk.AccAddress, error) {
 				return k.GetAddress()
 			},
 			expectedErr: nil,
@@ -1644,7 +1645,7 @@ func TestAltKeyring_DeleteByAddress(t *testing.T) {
 			name:    "not found",
 			backend: BackendTest,
 			uid:     "notFoundUid",
-			getAddres: func(k *Record) (sdk.AccAddress, error) {
+			getAddress: func(k *Record) (sdk.AccAddress, error) {
 				return nil, nil
 			},
 			expectedErr: sdkerrors.ErrKeyNotFound,
@@ -1653,7 +1654,7 @@ func TestAltKeyring_DeleteByAddress(t *testing.T) {
 			name:    "in memory correct delete",
 			backend: BackendMemory,
 			uid:     "inMemory",
-			getAddres: func(k *Record) (sdk.AccAddress, error) {
+			getAddress: func(k *Record) (sdk.AccAddress, error) {
 				return k.GetAddress()
 			},
 			expectedErr: nil,
@@ -1662,7 +1663,7 @@ func TestAltKeyring_DeleteByAddress(t *testing.T) {
 			name:    "in memory not found",
 			backend: BackendMemory,
 			uid:     "inMemoryNotFoundUid",
-			getAddres: func(k *Record) (sdk.AccAddress, error) {
+			getAddress: func(k *Record) (sdk.AccAddress, error) {
 				return nil, nil
 			},
 			expectedErr: sdkerrors.ErrKeyNotFound,
@@ -1675,7 +1676,7 @@ func TestAltKeyring_DeleteByAddress(t *testing.T) {
 
 			mnemonic, _, err := kr.NewMnemonic(tt.uid, English, sdk.FullFundraiserPath, DefaultBIP39Passphrase, hd.Secp256k1)
 			require.NoError(t, err)
-			addr, err := tt.getAddres(mnemonic)
+			addr, err := tt.getAddress(mnemonic)
 			require.NoError(t, err)
 
 			err = kr.DeleteByAddress(addr)
@@ -2002,7 +2003,7 @@ func TestRenameKey(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
+
 		kr := newKeyring(t, "testKeyring")
 		t.Run(tc.name, func(t *testing.T) {
 			tc.run(kr)
@@ -2012,7 +2013,7 @@ func TestRenameKey(t *testing.T) {
 
 // TestChangeBcrypt tests the compatibility from upstream Bcrypt and our own
 func TestChangeBcrypt(t *testing.T) {
-	pw := []byte("somepasswword!")
+	pw := []byte("somepassword!")
 
 	saltBytes := cmtcrypto.CRandBytes(16)
 	cosmosHash, err := cosmosbcrypt.GenerateFromPassword(saltBytes, pw, 2)
@@ -2038,6 +2039,7 @@ func TestChangeBcrypt(t *testing.T) {
 
 func requireEqualRenamedKey(t *testing.T, key, mnemonic *Record, nameMatch bool) {
 	t.Helper()
+
 	if nameMatch {
 		require.Equal(t, key.Name, mnemonic.Name)
 	}
@@ -2057,6 +2059,7 @@ func requireEqualRenamedKey(t *testing.T, key, mnemonic *Record, nameMatch bool)
 
 func newKeyring(t *testing.T, name string) Keyring {
 	t.Helper()
+
 	cdc := getCodec()
 	kr, err := New(name, "test", t.TempDir(), nil, cdc)
 	require.NoError(t, err)
@@ -2065,6 +2068,7 @@ func newKeyring(t *testing.T, name string) Keyring {
 
 func newKeyRecord(t *testing.T, kr Keyring, name string) *Record {
 	t.Helper()
+
 	k, _, err := kr.NewMnemonic(name, English, sdk.FullFundraiserPath, DefaultBIP39Passphrase, hd.Secp256k1)
 	require.NoError(t, err)
 	return k
@@ -2072,6 +2076,7 @@ func newKeyRecord(t *testing.T, kr Keyring, name string) *Record {
 
 func assertKeysExist(t *testing.T, kr Keyring, names ...string) {
 	t.Helper()
+
 	for _, n := range names {
 		_, err := kr.Key(n)
 		require.NoError(t, err)

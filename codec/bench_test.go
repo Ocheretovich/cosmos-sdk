@@ -7,33 +7,33 @@ import (
 	protov2 "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	counterv1 "cosmossdk.io/api/cosmos/counter/v1"
+	bankv1beta1 "cosmossdk.io/api/cosmos/bank/v1beta1"
 
 	codectestutil "github.com/cosmos/cosmos-sdk/codec/testutil"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/testutil/testdata"
-	countertypes "github.com/cosmos/cosmos-sdk/testutil/x/counter/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 )
 
-type msgCounterWrapper struct {
-	*countertypes.MsgIncreaseCounter
+type bankSendWrapper struct {
+	*banktypes.MsgSend
 }
 
-func (msg msgCounterWrapper) GetSigners() []sdk.AccAddress {
-	fromAddress, _ := sdk.AccAddressFromBech32(msg.Signer)
+func (msg bankSendWrapper) GetSigners() []sdk.AccAddress {
+	fromAddress, _ := sdk.AccAddressFromBech32(msg.FromAddress)
 	return []sdk.AccAddress{fromAddress}
 }
 
 func BenchmarkLegacyGetSigners(b *testing.B) {
 	_, _, addr := testdata.KeyTestPubAddr()
-	msg := msgCounterWrapper{&countertypes.MsgIncreaseCounter{
-		Signer: addr.String(),
-		Count:  2,
+	msg := bankSendWrapper{&banktypes.MsgSend{
+		FromAddress: addr.String(),
+		ToAddress:   "",
+		Amount:      nil,
 	}}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = msg.GetSigners()
 	}
 }
@@ -43,13 +43,13 @@ func BenchmarkProtoreflectGetSigners(b *testing.B) {
 	signingCtx := cdc.InterfaceRegistry().SigningContext()
 	_, _, addr := testdata.KeyTestPubAddr()
 	// use a pulsar message
-	msg := &counterv1.MsgIncreaseCounter{
-		Signer: addr.String(),
-		Count:  1,
+	msg := &bankv1beta1.MsgSend{
+		FromAddress: addr.String(),
+		ToAddress:   "",
+		Amount:      nil,
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := signingCtx.GetSigners(msg)
 		if err != nil {
 			panic(err)
@@ -61,16 +61,16 @@ func BenchmarkProtoreflectGetSignersWithUnmarshal(b *testing.B) {
 	cdc := codectestutil.CodecOptions{}.NewCodec()
 	_, _, addr := testdata.KeyTestPubAddr()
 	// start with a protoreflect message
-	msg := &countertypes.MsgIncreaseCounter{
-		Signer: addr.String(),
-		Count:  1,
+	msg := &banktypes.MsgSend{
+		FromAddress: addr.String(),
+		ToAddress:   "",
+		Amount:      nil,
 	}
 	// marshal to an any first because this is what we get from the wire
 	a, err := codectypes.NewAnyWithValue(msg)
 	require.NoError(b, err)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _, err := cdc.GetMsgAnySigners(a)
 		if err != nil {
 			panic(err)
@@ -82,9 +82,10 @@ func BenchmarkProtoreflectGetSignersDynamicpb(b *testing.B) {
 	cdc := codectestutil.CodecOptions{}.NewCodec()
 	signingCtx := cdc.InterfaceRegistry().SigningContext()
 	_, _, addr := testdata.KeyTestPubAddr()
-	msg := &counterv1.MsgIncreaseCounter{
-		Signer: addr.String(),
-		Count:  1,
+	msg := &bankv1beta1.MsgSend{
+		FromAddress: addr.String(),
+		ToAddress:   "",
+		Amount:      nil,
 	}
 	bz, err := protov2.Marshal(msg)
 	require.NoError(b, err)
@@ -93,8 +94,7 @@ func BenchmarkProtoreflectGetSignersDynamicpb(b *testing.B) {
 	err = protov2.Unmarshal(bz, dynamicmsg)
 	require.NoError(b, err)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := signingCtx.GetSigners(dynamicmsg)
 		if err != nil {
 			panic(err)

@@ -2,26 +2,29 @@ package keeper
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"cosmossdk.io/collections"
-	"cosmossdk.io/core/appmodule"
-	corecontext "cosmossdk.io/core/context"
 	"cosmossdk.io/core/event"
-	"cosmossdk.io/x/consensus/exported"
-	"cosmossdk.io/x/consensus/types"
+	storetypes "cosmossdk.io/core/store"
+	"cosmossdk.io/errors"
 
 	"github.com/cosmos/cosmos-sdk/codec"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/consensus/exported"
+	"github.com/cosmos/cosmos-sdk/x/consensus/types"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 )
 
+var StoreKey = "Consensus"
+
 type Keeper struct {
-	appmodule.Environment
+	storeService storetypes.KVStoreService
+	event        event.Service
 
 	authority   string
 	ParamsStore collections.Item[cmtproto.ConsensusParams]
@@ -29,42 +32,18 @@ type Keeper struct {
 
 var _ exported.ConsensusParamSetter = Keeper{}.ParamsStore
 
-func NewKeeper(cdc codec.BinaryCodec, env appmodule.Environment, authority string) Keeper {
-	sb := collections.NewSchemaBuilder(env.KVStoreService)
+func NewKeeper(cdc codec.BinaryCodec, storeService storetypes.KVStoreService, authority string, em event.Service) Keeper {
+	sb := collections.NewSchemaBuilder(storeService)
 	return Keeper{
-		Environment: env,
-		authority:   authority,
-		ParamsStore: collections.NewItem(sb, collections.NewPrefix("Consensus"), "params", codec.CollValue[cmtproto.ConsensusParams](cdc)),
+		storeService: storeService,
+		authority:    authority,
+		event:        em,
+		ParamsStore:  collections.NewItem(sb, collections.NewPrefix("Consensus"), "params", codec.CollValue[cmtproto.ConsensusParams](cdc)),
 	}
 }
 
 func (k *Keeper) GetAuthority() string {
 	return k.authority
-}
-
-// InitGenesis initializes the initial state of the module
-func (k *Keeper) InitGenesis(ctx context.Context) error {
-	value, ok := ctx.Value(corecontext.InitInfoKey).(*types.MsgUpdateParams)
-	if !ok {
-		// no error for appv1 and appv2
-		return nil
-	}
-	if value == nil {
-		// no error for appv1
-		return nil
-	}
-
-	consensusParams, err := value.ToProtoConsensusParams()
-	if err != nil {
-		return err
-	}
-
-	nextParams, err := k.paramCheck(ctx, consensusParams)
-	if err != nil {
-		return err
-	}
-
-	return k.ParamsStore.Set(ctx, nextParams.ToProto())
 }
 
 // Querier
@@ -87,7 +66,7 @@ var _ types.MsgServer = Keeper{}
 
 func (k Keeper) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
 	if k.GetAuthority() != msg.Authority {
-		return nil, fmt.Errorf("invalid authority; expected %s, got %s", k.GetAuthority(), msg.Authority)
+		return nil, errors.Wrapf(govtypes.ErrInvalidSigner, "invalid authority; expected %s, got %s", k.GetAuthority(), msg.Authority)
 	}
 
 	consensusParams, err := msg.ToProtoConsensusParams()
@@ -95,39 +74,17 @@ func (k Keeper) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*
 		return nil, err
 	}
 
-	nextParams, err := k.paramCheck(ctx, consensusParams)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := k.ParamsStore.Set(ctx, nextParams.ToProto()); err != nil {
-		return nil, err
-	}
-
-	if err := k.EventService.EventManager(ctx).EmitKV(
-		"update_consensus_params",
-		event.NewAttribute("authority", msg.Authority),
-		event.NewAttribute("parameters", consensusParams.String())); err != nil {
-		return nil, err
-	}
-
-	return &types.MsgUpdateParamsResponse{}, nil
-}
-
-// paramCheck validates the consensus params
-func (k Keeper) paramCheck(ctx context.Context, consensusParams cmtproto.ConsensusParams) (*cmttypes.ConsensusParams, error) {
 	paramsProto, err := k.ParamsStore.Get(ctx)
-
-	var params cmttypes.ConsensusParams
 	if err != nil {
-		if errors.Is(err, collections.ErrNotFound) {
-			params = cmttypes.ConsensusParams{}
-		} else {
-			return nil, err
-		}
-	} else {
-		params = cmttypes.ConsensusParamsFromProto(paramsProto)
+		return nil, err
 	}
+
+	// initialize version params with zero value if not set
+	if paramsProto.Version == nil {
+		paramsProto.Version = &cmtproto.VersionParams{}
+	}
+
+	params := cmttypes.ConsensusParamsFromProto(paramsProto)
 
 	nextParams := params.Update(&consensusParams)
 
@@ -135,9 +92,23 @@ func (k Keeper) paramCheck(ctx context.Context, consensusParams cmtproto.Consens
 		return nil, err
 	}
 
-	if err := params.ValidateUpdate(&consensusParams, k.HeaderService.HeaderInfo(ctx).Height); err != nil {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	if err := params.ValidateUpdate(&consensusParams, sdkCtx.BlockHeader().Height); err != nil {
 		return nil, err
 	}
 
-	return &nextParams, nil
+	if err := k.ParamsStore.Set(ctx, nextParams.ToProto()); err != nil {
+		return nil, err
+	}
+
+	if err := k.event.EventManager(ctx).EmitKV(
+		ctx,
+		"update_consensus_params",
+		event.Attribute{Key: "authority", Value: msg.Authority},
+		event.Attribute{Key: "parameters", Value: consensusParams.String()}); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgUpdateParamsResponse{}, nil
 }

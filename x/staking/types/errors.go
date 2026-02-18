@@ -19,7 +19,7 @@ var (
 	ErrCommissionChangeRateGTMaxRate   = errors.Register(ModuleName, 14, "commission change rate cannot be more than the max rate")
 	ErrCommissionGTMaxChangeRate       = errors.Register(ModuleName, 15, "commission cannot be changed more than max change rate")
 	ErrSelfDelegationBelowMinimum      = errors.Register(ModuleName, 16, "validator's self delegation must be greater than their minimum self delegation")
-	ErrMinSelfDelegationDecreased      = errors.Register(ModuleName, 17, "minimum self delegation cannot be decrease")
+	ErrMinSelfDelegationDecreased      = errors.Register(ModuleName, 17, "minimum self delegation cannot be decreased")
 	ErrEmptyDelegatorAddr              = errors.Register(ModuleName, 18, "empty delegator address")
 	ErrNoDelegation                    = errors.Register(ModuleName, 19, "no delegation for (address, validator) tuple")
 	ErrBadDelegatorAddr                = errors.Register(ModuleName, 20, "delegator does not exist with address")
@@ -39,6 +39,8 @@ var (
 	ErrDelegatorShareExRateInvalid     = errors.Register(ModuleName, 34, "cannot delegate to validators with invalid (zero) ex-rate")
 	ErrBothShareMsgsGiven              = errors.Register(ModuleName, 35, "both shares amount and shares percent provided")
 	ErrNeitherShareMsgsGiven           = errors.Register(ModuleName, 36, "neither shares amount nor shares percent provided")
+	ErrInvalidHistoricalInfo           = errors.Register(ModuleName, 37, "invalid historical info")
+	ErrNoHistoricalInfo                = errors.Register(ModuleName, 38, "no historical info found")
 	ErrEmptyValidatorPubKey            = errors.Register(ModuleName, 39, "empty validator public key")
 	ErrCommissionLTMinRate             = errors.Register(ModuleName, 40, "commission cannot be less than min rate")
 	ErrUnbondingNotFound               = errors.Register(ModuleName, 41, "unbonding operation not found")
@@ -46,8 +48,4 @@ var (
 	ErrInvalidSigner                   = errors.Register(ModuleName, 43, "expected authority account as only signer for proposal message")
 	ErrBadRedelegationSrc              = errors.Register(ModuleName, 44, "redelegation source validator not found")
 	ErrNoUnbondingType                 = errors.Register(ModuleName, 45, "unbonding type not found")
-
-	// consensus key errors
-	ErrExceedingMaxConsPubKeyRotations = errors.Register(ModuleName, 46, "exceeding maximum consensus pubkey rotations within unbonding period")
-	ErrConsensusPubKeyLenInvalid       = errors.Register(ModuleName, 47, "consensus pubkey len is invalid")
 )

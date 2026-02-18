@@ -1,57 +1,65 @@
 package simulation
 
 import (
-	"context"
 	"math/rand"
 
-	coreaddress "cosmossdk.io/core/address"
-	pooltypes "cosmossdk.io/x/protocolpool/types"
+	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/address"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	"github.com/cosmos/cosmos-sdk/x/protocolpool/types"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
 )
 
+// Simulation operation weights constants
 const (
-	OpWeightMsgCommunityPoolSpend = "op_weight_msg_community_pool_spend"
+	DefaultWeightMsgUpdateParams int = 50
 
-	DefaultWeightMsgCommunityPoolSpend int = 50
+	OpWeightMsgUpdateParams = "op_weight_msg_update_params"
+
+	DefaultWeightCreateContinuousFund int = 50
+
+	OpWeightMsgCreateContinuousFund = "op_weight_msg_create_continuous_fund"
 )
 
+// ProposalMsgs defines the module weighted proposals' contents
 func ProposalMsgs() []simtypes.WeightedProposalMsg {
 	return []simtypes.WeightedProposalMsg{
-		simulation.NewWeightedProposalMsgX(
-			OpWeightMsgCommunityPoolSpend,
-			DefaultWeightMsgCommunityPoolSpend,
-			SimulateMsgCommunityPoolSpend,
+		simulation.NewWeightedProposalMsg(
+			OpWeightMsgUpdateParams,
+			DefaultWeightMsgUpdateParams,
+			SimulateMsgUpdateParams,
+		),
+		simulation.NewWeightedProposalMsg(
+			OpWeightMsgCreateContinuousFund,
+			DefaultWeightCreateContinuousFund,
+			SimulateMsgCreateContinuousFund,
 		),
 	}
 }
 
-func SimulateMsgCommunityPoolSpend(_ context.Context, r *rand.Rand, _ []simtypes.Account, cdc coreaddress.Codec) (sdk.Msg, error) {
+// SimulateMsgUpdateParams returns a random MsgUpdateParams
+func SimulateMsgUpdateParams(r *rand.Rand, _ sdk.Context, _ []simtypes.Account) sdk.Msg {
 	// use the default gov module account address as authority
 	var authority sdk.AccAddress = address.Module("gov")
 
-	accs := simtypes.RandomAccounts(r, 5)
-	acc, _ := simtypes.RandomAcc(r, accs)
+	return &types.MsgUpdateParams{
+		Authority: authority.String(),
+		Params:    GenParams(r),
+	}
+}
 
-	coins, err := sdk.ParseCoinsNormalized("100stake,2testtoken")
-	if err != nil {
-		return nil, err
-	}
+// SimulateMsgCreateContinuousFund returns a random MsgCreateContinuousFund
+func SimulateMsgCreateContinuousFund(r *rand.Rand, _ sdk.Context, accs []simtypes.Account) sdk.Msg {
+	// use the default gov module account address as authority
+	var authority sdk.AccAddress = address.Module("gov")
+	simAccount, _ := simtypes.RandomAcc(r, accs)
+	percentage := math.LegacyNewDec(int64(r.Intn(10) + 1)).Quo(math.LegacyNewDec(100))
 
-	authorityAddr, err := cdc.BytesToString(authority)
-	if err != nil {
-		return nil, err
+	return &types.MsgCreateContinuousFund{
+		Authority:  authority.String(),
+		Recipient:  simAccount.Address.String(),
+		Percentage: percentage,
 	}
-	recipentAddr, err := cdc.BytesToString(acc.Address)
-	if err != nil {
-		return nil, err
-	}
-	return &pooltypes.MsgCommunityPoolSpend{
-		Authority: authorityAddr,
-		Recipient: recipentAddr,
-		Amount:    coins,
-	}, nil
 }

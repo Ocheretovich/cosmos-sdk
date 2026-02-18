@@ -3,7 +3,6 @@ package snapshots
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
 	"hash"
 	"io"
 	"math"
@@ -141,7 +140,6 @@ func (s *Store) Load(height uint64, format uint32) (*types.Snapshot, <-chan io.R
 	}
 
 	ch := make(chan io.ReadCloser)
-
 	go func() {
 		defer close(ch)
 		for i := uint32(0); i < snapshot.Chunks; i++ {
@@ -152,19 +150,14 @@ func (s *Store) Load(height uint64, format uint32) (*types.Snapshot, <-chan io.R
 				_ = pw.CloseWithError(err)
 				return
 			}
-			err = func() error {
-				defer chunk.Close()
-
-				if _, err := io.Copy(pw, chunk); err != nil {
-					_ = pw.CloseWithError(err)
-					return fmt.Errorf("failed to copy chunk %d: %w", i, err)
-				}
-
-				return pw.Close()
-			}()
+			defer chunk.Close()
+			_, err = io.Copy(pw, chunk)
 			if err != nil {
+				_ = pw.CloseWithError(err)
 				return
 			}
+			chunk.Close()
+			pw.Close()
 		}
 	}()
 

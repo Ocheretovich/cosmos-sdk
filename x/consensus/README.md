@@ -4,72 +4,87 @@ sidebar_position: 1
 
 # `x/consensus`
 
-## Abstract 
+The consensus module provides functionality to modify CometBFT's ABCI consensus parameters on-chain through governance proposals.
 
-Functionality to modify CometBFT's ABCI consensus params.
+## Overview
 
-## Contents
+This module allows authorized entities (typically governance) to update critical consensus parameters that affect blockchain performance and security without requiring a hard fork.
 
-* [State](#state)
-* [Params](#params)
-* [Keepers](#keepers)
-* [Messages](#messages)
-* [Consensus Messages](#consensus-messages)
-* [Events](#events)
-    * [Message Events](#message-events)
+## Key Features
 
+- **Parameter Updates**: Modify consensus parameters through governance proposals
+- **Authority Control**: Only authorized addresses can update parameters
+- **Validation**: Comprehensive parameter validation before updates
+- **ABCI Integration**: Direct integration with CometBFT consensus engine
 
-## State
+## Consensus Parameters
 
-The `x/consensus` module keeps state of the consensus params from cometbft.:
+The module manages the following CometBFT consensus parameters:
 
-## Params
+### Block Parameters
+- `MaxBytes`: Maximum block size in bytes
+- `MaxGas`: Maximum gas per block
 
-The consensus module stores it's params in state with the prefix of `0x05`,
-it can be updated with governance or the address with authority.
+### Evidence Parameters
+- `MaxAgeNumBlocks`: Maximum age of evidence in blocks
+- `MaxAgeDuration`: Maximum age of evidence in time
+- `MaxBytes`: Maximum evidence size in bytes
 
-* Params: `0x05 | ProtocolBuffer(cometbft.ConsensusParams)`
+### Validator Parameters
+- `PubKeyTypes`: Supported public key types for validators
 
-```protobuf reference
-https://github.com/cosmos/cosmos-sdk/blob/381de6452693a9338371223c232fba0c42773a4b/proto/cosmos/consensus/v1/consensus.proto#L11-L18
+### ABCI Parameters
+- `VoteExtensionsEnableHeight`: Height at which vote extensions are enabled
+
+## Usage
+
+### Governance Proposal
+
+To update consensus parameters, submit a governance proposal with `MsgUpdateParams`:
+
+```go
+import (
+    "time"
+    govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+    authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+)
+
+msg := &types.MsgUpdateParams{
+    Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(), // governance authority
+    Block: &types.BlockParams{
+        MaxBytes: 22020096,
+        MaxGas:   10000000,
+    },
+    Evidence: &types.EvidenceParams{
+        MaxAgeNumBlocks: 100000,
+        MaxAgeDuration:  48 * time.Hour,
+        MaxBytes:        1048576,
+    },
+    Validator: &types.ValidatorParams{
+        PubKeyTypes: []string{"ed25519"},
+    },
+    Abci: &types.ABCIParams{
+        VoteExtensionsEnableHeight: 0,
+    },
+}
 ```
 
-## Keepers
+### Query Parameters
 
-The consensus module provides methods to Set and Get consensus params. It is recommended to use the `x/consensus` module keeper to get consensus params instead of accessing them through the context.
+Retrieve current consensus parameters:
 
-## Messages
-
-### UpdateParams
-
-Update consensus params.
-
-```protobuf reference
-https://github.com/cosmos/cosmos-sdk/blob/381de6452693a9338371223c232fba0c42773a4b/proto/cosmos/consensus/v1/tx.proto#L12-L47
+```bash
+<appd> q consensus params
 ```
 
-The message will fail under the following conditions:
+## Architecture
 
-* The signer is not the set authority 
-* Not all values are set
+- **Keeper**: Manages parameter storage and validation
+- **Types**: Defines message types and parameter structures
+- **Module**: Integrates with the Cosmos SDK application lifecycle
 
-## Consensus Messages
+## Security
 
-The consensus module has a consensus message that is used to set the consensus params when the chain initializes. It is similar to the `UpdateParams` message but it is only used once at the start of the chain.
-
-```protobuf reference
-https://github.com/cosmos/cosmos-sdk/blob/381de6452693a9338371223c232fba0c42773a4b/proto/cosmos/consensus/v1/consensus.proto#L9-L24
-```
-
-## Events
-
-The consensus module emits the following events:
-
-### Message Events
-
-#### MsgUpdateParams
-
-| Type   | Attribute Key | Attribute Value     |
-|--------|---------------|---------------------|
-| string | authority     | msg.Signer          |
-| string | parameters    | consensus Parameters |
+- Only the designated authority can update parameters
+- All parameter changes are validated before application
+- Updates are subject to governance approval process

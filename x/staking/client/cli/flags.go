@@ -3,7 +3,7 @@ package cli
 import (
 	flag "github.com/spf13/pflag"
 
-	"cosmossdk.io/x/staking/types"
+	"github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 const (

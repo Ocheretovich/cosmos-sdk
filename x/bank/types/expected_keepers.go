@@ -1,12 +1,12 @@
 package types
 
 import (
-	"context"
+	context "context"
 
 	"cosmossdk.io/core/address"
-	"cosmossdk.io/x/auth/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
 // AccountKeeper defines the account contract that must be fulfilled when
@@ -18,8 +18,12 @@ type AccountKeeper interface {
 	NewAccountWithAddress(ctx context.Context, addr sdk.AccAddress) sdk.AccountI
 
 	GetAccount(ctx context.Context, addr sdk.AccAddress) sdk.AccountI
+	GetAllAccounts(ctx context.Context) []sdk.AccountI
 	HasAccount(ctx context.Context, addr sdk.AccAddress) bool
 	SetAccount(ctx context.Context, acc sdk.AccountI)
+
+	IterateAccounts(ctx context.Context, process func(sdk.AccountI) bool)
+
 	ValidatePermissions(macc sdk.ModuleAccountI) error
 
 	GetModuleAddress(moduleName string) sdk.AccAddress

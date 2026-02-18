@@ -4,23 +4,23 @@ import (
 	"fmt"
 	"testing"
 
+	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 
-	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/math"
-	banktestutil "cosmossdk.io/x/bank/testutil"
-	"cosmossdk.io/x/staking"
-	"cosmossdk.io/x/staking/types"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/module"
+	banktestutil "github.com/cosmos/cosmos-sdk/x/bank/testutil"
+	"github.com/cosmos/cosmos-sdk/x/staking"
+	"github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 func bootstrapGenesisTest(t *testing.T, numAddrs int) (*fixture, []sdk.AccAddress) {
 	t.Helper()
 	t.Parallel()
+
 	f := initFixture(t)
 
 	addrDels, _ := generateAddresses(f, numAddrs)
@@ -45,7 +45,7 @@ func TestInitGenesis(t *testing.T) {
 	}
 	assert.NilError(t, f.stakingKeeper.SetValidator(f.sdkCtx, bondedVal))
 
-	params, err := f.stakingKeeper.Params.Get(f.sdkCtx)
+	params, err := f.stakingKeeper.GetParams(f.sdkCtx)
 	assert.NilError(t, err)
 
 	validators, err := f.stakingKeeper.GetAllValidators(f.sdkCtx)
@@ -99,11 +99,9 @@ func TestInitGenesis(t *testing.T) {
 	delegations = append(delegations, genesisDelegations...)
 
 	genesisState := types.NewGenesisState(params, validators, delegations)
-	vals, err := (f.stakingKeeper.InitGenesis(f.sdkCtx, genesisState))
-	assert.NilError(t, err)
+	vals := (f.stakingKeeper.InitGenesis(f.sdkCtx, genesisState))
 
-	actualGenesis, err := (f.stakingKeeper.ExportGenesis(f.sdkCtx))
-	assert.NilError(t, err)
+	actualGenesis := (f.stakingKeeper.ExportGenesis(f.sdkCtx))
 	assert.DeepEqual(t, genesisState.Params, actualGenesis.Params)
 	assert.DeepEqual(t, genesisState.Delegations, actualGenesis.Delegations)
 
@@ -128,11 +126,13 @@ func TestInitGenesis(t *testing.T) {
 	assert.Assert(t, found)
 	assert.Equal(t, types.Bonded, resVal.Status)
 
-	validatorUpdates := make([]appmodule.ValidatorUpdate, len(vals))
+	abcivals := make([]abci.ValidatorUpdate, len(vals))
+
 	for i, val := range validators {
-		validatorUpdates[i] = val.ModuleValidatorUpdate(f.stakingKeeper.PowerReduction(f.sdkCtx))
+		abcivals[i] = val.ABCIValidatorUpdate((f.stakingKeeper.PowerReduction(f.sdkCtx)))
 	}
-	assert.DeepEqual(t, validatorUpdates, vals)
+
+	assert.DeepEqual(t, abcivals, vals)
 }
 
 func TestInitGenesis_PoolsBalanceMismatch(t *testing.T) {
@@ -158,23 +158,27 @@ func TestInitGenesis_PoolsBalanceMismatch(t *testing.T) {
 		BondDenom:     "stake",
 	}
 
-	// setting validator status to bonded so the balance counts towards bonded pool
-	validator.Status = types.Bonded
-	_, err = f.stakingKeeper.InitGenesis(f.sdkCtx, &types.GenesisState{
-		Params:     params,
-		Validators: []types.Validator{validator},
-	})
-	// "should error because bonded pool balance is different from bonded pool coins",
-	require.NotNil(t, err)
+	require.Panics(t, func() {
+		// setting validator status to bonded so the balance counts towards bonded pool
+		validator.Status = types.Bonded
+		f.stakingKeeper.InitGenesis(f.sdkCtx, &types.GenesisState{
+			Params:     params,
+			Validators: []types.Validator{validator},
+		})
+	},
+	// "should panic because bonded pool balance is different from bonded pool coins",
+	)
 
-	// setting validator status to unbonded so the balance counts towards not bonded pool
-	validator.Status = types.Unbonded
-	_, err = f.stakingKeeper.InitGenesis(f.sdkCtx, &types.GenesisState{
-		Params:     params,
-		Validators: []types.Validator{validator},
-	})
+	require.Panics(t, func() {
+		// setting validator status to unbonded so the balance counts towards not bonded pool
+		validator.Status = types.Unbonded
+		f.stakingKeeper.InitGenesis(f.sdkCtx, &types.GenesisState{
+			Params:     params,
+			Validators: []types.Validator{validator},
+		})
+	},
 	// "should panic because not bonded pool balance is different from not bonded pool coins",
-	require.NotNil(t, err)
+	)
 }
 
 func TestInitGenesisLargeValidatorSet(t *testing.T) {
@@ -185,7 +189,7 @@ func TestInitGenesisLargeValidatorSet(t *testing.T) {
 	genesisValidators, err := f.stakingKeeper.GetAllValidators(f.sdkCtx)
 	assert.NilError(t, err)
 
-	params, err := f.stakingKeeper.Params.Get(f.sdkCtx)
+	params, err := f.stakingKeeper.GetParams(f.sdkCtx)
 	assert.NilError(t, err)
 	delegations := []types.Delegation{}
 	validators := make([]types.Validator, size)
@@ -225,14 +229,14 @@ func TestInitGenesisLargeValidatorSet(t *testing.T) {
 		),
 	)
 
-	vals, err := f.stakingKeeper.InitGenesis(f.sdkCtx, genesisState)
-	assert.NilError(t, err)
+	vals := f.stakingKeeper.InitGenesis(f.sdkCtx, genesisState)
 
-	validatorUpdates := make([]module.ValidatorUpdate, 100)
+	abcivals := make([]abci.ValidatorUpdate, 100)
 	for i, val := range validators[:100] {
-		validatorUpdates[i] = val.ModuleValidatorUpdate(f.stakingKeeper.PowerReduction(f.sdkCtx))
+		abcivals[i] = val.ABCIValidatorUpdate(f.stakingKeeper.PowerReduction(f.sdkCtx))
 	}
+
 	// remove genesis validator
 	vals = vals[:100]
-	assert.DeepEqual(t, validatorUpdates, vals)
+	assert.DeepEqual(t, abcivals, vals)
 }

@@ -9,7 +9,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	msg "cosmossdk.io/api/cosmos/msg/v1"
-	"cosmossdk.io/x/tx/signing"
+
+	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 )
 
 // ValidateProtoAnnotations validates that the proto annotations are correct.
@@ -26,10 +27,10 @@ func ValidateProtoAnnotations(protoFiles signing.ProtoFileResolver) error {
 
 	var serviceErrs []error
 	protoFiles.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
-		for i := 0; i < fd.Services().Len(); i++ {
+		for i := range fd.Services().Len() {
 			sd := fd.Services().Get(i)
 			if sd.Name() == "Msg" {
-				// We use the heuristic that services name Msg are exactly the
+				// We use the heuristic that services named Msg are exactly the
 				// ones that need the proto annotations check.
 				err := validateMsgServiceAnnotations(sd)
 				if err != nil {

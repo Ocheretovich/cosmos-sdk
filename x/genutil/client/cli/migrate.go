@@ -3,23 +3,30 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/exp/maps"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/version"
+	v043 "github.com/cosmos/cosmos-sdk/x/genutil/migrations/v043"
+	v046 "github.com/cosmos/cosmos-sdk/x/genutil/migrations/v046"
+	v047 "github.com/cosmos/cosmos-sdk/x/genutil/migrations/v047"
 	"github.com/cosmos/cosmos-sdk/x/genutil/types"
 )
 
 const flagGenesisTime = "genesis-time"
 
 // MigrationMap is a map of SDK versions to their respective genesis migration functions.
-var MigrationMap = types.MigrationMap{}
+var MigrationMap = types.MigrationMap{
+	"v0.43": v043.Migrate, // NOTE: v0.43, v0.44 and v0.45 are genesis compatible.
+	"v0.46": v046.Migrate,
+	"v0.47": v047.Migrate,
+}
 
 // MigrateGenesisCmd returns a command to execute genesis state migration.
 // Applications should pass their own migration map to this function.
@@ -29,7 +36,7 @@ func MigrateGenesisCmd(migrations types.MigrationMap) *cobra.Command {
 		Use:     "migrate [target-version] [genesis-file]",
 		Short:   "Migrate genesis to a specified target version",
 		Long:    "Migrate the source genesis into the target version and print to STDOUT",
-		Example: fmt.Sprintf("%s migrate v0.47 /path/to/genesis.json --chain-id=cosmoshub-3 --genesis-time=2019-04-22T17:00:00Z", version.AppName),
+		Example: fmt.Sprintf("%s genesis migrate v0.47 /path/to/genesis.json --chain-id=cosmoshub-3 --genesis-time=2019-04-22T17:00:00Z", version.AppName),
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return MigrateHandler(cmd, args, migrations)
@@ -51,8 +58,7 @@ func MigrateHandler(cmd *cobra.Command, args []string, migrations types.Migratio
 	target := args[0]
 	migrationFunc, ok := migrations[target]
 	if !ok || migrationFunc == nil {
-		versions := maps.Keys(migrations)
-		sort.Strings(versions)
+		versions := slices.Sorted(maps.Keys(migrations))
 		return fmt.Errorf("unknown migration function for version: %s (supported versions %s)", target, strings.Join(versions, ", "))
 	}
 

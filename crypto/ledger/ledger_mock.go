@@ -1,5 +1,4 @@
 //go:build ledger && test_ledger_mock
-// +build ledger,test_ledger_mock
 
 package ledger
 
@@ -29,7 +28,7 @@ func init() {
 	initOptionsDefault()
 }
 
-type LedgerSECP256K1Mock struct{}
+type LedgerSECP256K1Mock struct{} //nolint: revive // we can ignore this, as this type is being used
 
 func (mock LedgerSECP256K1Mock) Close() error {
 	return nil
@@ -39,6 +38,10 @@ func (mock LedgerSECP256K1Mock) Close() error {
 // as per the original API, it returns an uncompressed key
 func (mock LedgerSECP256K1Mock) GetPublicKeySECP256K1(derivationPath []uint32) ([]byte, error) {
 	if derivationPath[0] != 44 {
+		return nil, errors.New("invalid derivation path")
+	}
+
+	if derivationPath[1] != sdk.GetConfig().GetCoinType() {
 		return nil, errors.New("invalid derivation path")
 	}
 

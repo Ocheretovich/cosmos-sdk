@@ -1,94 +1,91 @@
 package simulation
 
 import (
+	"fmt"
 	"math/rand"
 
-	"cosmossdk.io/x/protocolpool/keeper"
-	"cosmossdk.io/x/protocolpool/types"
+	"cosmossdk.io/math"
 
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	"github.com/cosmos/cosmos-sdk/x/protocolpool/keeper"
+	"github.com/cosmos/cosmos-sdk/x/protocolpool/types"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
 )
+
+var TypeFundCommunityPool = sdk.MsgTypeURL(&types.MsgFundCommunityPool{})
 
 // Simulation operation weights constants
 const (
 	OpWeightMsgFundCommunityPool = "op_weight_msg_fund_community_pool"
 
-	DefaultWeightMsgFundCommunityPool int = 50
+	DefaultWeightMsgFundCommunityPool = 100
 )
 
 // WeightedOperations returns all the operations from the module with their respective weights
 func WeightedOperations(
 	appParams simtypes.AppParams,
-	cdc codec.JSONCodec,
-	txConfig client.TxConfig,
+	txGen client.TxConfig,
 	ak types.AccountKeeper,
 	bk types.BankKeeper,
 	k keeper.Keeper,
 ) simulation.WeightedOperations {
 	var weightMsgFundCommunityPool int
-	appParams.GetOrGenerate(OpWeightMsgFundCommunityPool, &weightMsgFundCommunityPool, nil, func(_ *rand.Rand) {
-		weightMsgFundCommunityPool = DefaultWeightMsgFundCommunityPool
-	})
+
+	appParams.GetOrGenerate(OpWeightMsgFundCommunityPool, &weightMsgFundCommunityPool, nil,
+		func(_ *rand.Rand) {
+			weightMsgFundCommunityPool = DefaultWeightMsgFundCommunityPool
+		},
+	)
 
 	return simulation.WeightedOperations{
 		simulation.NewWeightedOperation(
 			weightMsgFundCommunityPool,
-			SimulateMsgFundCommunityPool(txConfig, ak, bk, k),
+			SimulateMsgFundCommunityPool(txGen, ak, bk, k),
 		),
 	}
 }
 
-// SimulateMsgFundCommunityPool simulates MsgFundCommunityPool execution where
-// a random account sends a random amount of its funds to the community pool.
-func SimulateMsgFundCommunityPool(txConfig client.TxConfig, ak types.AccountKeeper, bk types.BankKeeper, k keeper.Keeper) simtypes.Operation {
-	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+func SimulateMsgFundCommunityPool(
+	txGen client.TxConfig,
+	ak types.AccountKeeper,
+	bk types.BankKeeper,
+	_ keeper.Keeper,
+) simtypes.Operation {
+	return func(r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
-		funder, _ := simtypes.RandomAcc(r, accs)
-
-		account := ak.GetAccount(ctx, funder.Address)
+		simAccount, _ := simtypes.RandomAcc(r, accs)
+		account := ak.GetAccount(ctx, simAccount.Address)
 		spendable := bk.SpendableCoins(ctx, account.GetAddress())
-
-		fundAmount := simtypes.RandSubsetCoins(r, spendable)
-		if fundAmount.Empty() {
-			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgFundCommunityPool{}), "fund amount is empty"), nil, nil
+		// choose 10% - 70% of spendable
+		// we do not want to use the full balance so that fees can be covered
+		decimalVal := r.Intn(6) + 1 // [1:7]
+		spendableSubAmount := keeper.PercentageCoinMul(math.LegacyMustNewDecFromStr(fmt.Sprintf("0.%d", decimalVal)), spendable)
+		if spendableSubAmount.IsZero() {
+			return simtypes.NoOpMsg(types.ModuleName, TypeFundCommunityPool, "no balance"), nil, nil
 		}
 
-		var (
-			fees sdk.Coins
-			err  error
-		)
-
-		coins, hasNeg := spendable.SafeSub(fundAmount...)
-		if !hasNeg {
-			fees, err = simtypes.RandomFees(r, coins)
-			if err != nil {
-				return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgFundCommunityPool{}), "unable to generate fees"), nil, err
-			}
+		msg := &types.MsgFundCommunityPool{
+			Amount:    spendableSubAmount,
+			Depositor: account.GetAddress().String(),
 		}
-
-		funderAddr, err := ak.AddressCodec().BytesToString(funder.Address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgFundCommunityPool{}), "unable to get funder address"), nil, err
-		}
-		msg := types.NewMsgFundCommunityPool(fundAmount, funderAddr)
 
 		txCtx := simulation.OperationInput{
-			R:             r,
-			App:           app,
-			TxGen:         txConfig,
-			Cdc:           nil,
-			Msg:           msg,
-			Context:       ctx,
-			SimAccount:    funder,
-			AccountKeeper: ak,
-			ModuleName:    types.ModuleName,
+			R:               r,
+			App:             app,
+			TxGen:           txGen,
+			Cdc:             nil,
+			Msg:             msg,
+			Context:         ctx,
+			SimAccount:      simAccount,
+			AccountKeeper:   ak,
+			Bankkeeper:      bk,
+			ModuleName:      types.ModuleName,
+			CoinsSpentInMsg: spendableSubAmount,
 		}
 
-		return simulation.GenAndDeliverTx(txCtx, fees)
+		return simulation.GenAndDeliverTxWithRandFees(txCtx)
 	}
 }

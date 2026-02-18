@@ -3,16 +3,15 @@ package protocolpool
 import (
 	modulev1 "cosmossdk.io/api/cosmos/protocolpool/module/v1"
 	"cosmossdk.io/core/appmodule"
+	"cosmossdk.io/core/store"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/depinject/appconfig"
-	authtypes "cosmossdk.io/x/auth/types"
-	"cosmossdk.io/x/protocolpool/keeper"
-	"cosmossdk.io/x/protocolpool/simulation"
-	"cosmossdk.io/x/protocolpool/types"
 
 	"github.com/cosmos/cosmos-sdk/codec"
-	"github.com/cosmos/cosmos-sdk/types/module"
-	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	"github.com/cosmos/cosmos-sdk/x/protocolpool/keeper"
+	"github.com/cosmos/cosmos-sdk/x/protocolpool/types"
 )
 
 var _ depinject.OnePerModuleType = AppModule{}
@@ -30,13 +29,12 @@ func init() {
 type ModuleInputs struct {
 	depinject.In
 
-	Config      *modulev1.Module
-	Codec       codec.Codec
-	Environment appmodule.Environment
+	Config       *modulev1.Module
+	Codec        codec.Codec
+	StoreService store.KVStoreService
 
 	AccountKeeper types.AccountKeeper
 	BankKeeper    types.BankKeeper
-	StakingKeeper types.StakingKeeper
 }
 
 type ModuleOutputs struct {
@@ -48,7 +46,7 @@ type ModuleOutputs struct {
 
 func ProvideModule(in ModuleInputs) ModuleOutputs {
 	// default to governance authority if not provided
-	authority := authtypes.NewModuleAddress("gov")
+	authority := authtypes.NewModuleAddress(govtypes.ModuleName)
 	if in.Config.Authority != "" {
 		authority = authtypes.NewModuleAddressOrBech32Address(in.Config.Authority)
 	}
@@ -58,36 +56,11 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		panic(err)
 	}
 
-	k := keeper.NewKeeper(in.Codec, in.Environment, in.AccountKeeper, in.BankKeeper, in.StakingKeeper, authorityAddr)
-	m := NewAppModule(in.Codec, k, in.AccountKeeper, in.BankKeeper)
+	k := keeper.NewKeeper(in.Codec, in.StoreService, in.AccountKeeper, in.BankKeeper, authorityAddr)
+	m := NewAppModule(k, in.AccountKeeper, in.BankKeeper)
 
 	return ModuleOutputs{
 		Keeper: k,
 		Module: m,
 	}
-}
-
-// ____________________________________________________________________________
-
-// AppModuleSimulation functions
-
-// GenerateGenesisState creates a randomized GenState of the protocolpool module.
-func (AppModule) GenerateGenesisState(simState *module.SimulationState) {
-}
-
-// RegisterStoreDecoder registers a decoder for protocolpool module's types
-func (am AppModule) RegisterStoreDecoder(sdr simtypes.StoreDecoderRegistry) {
-}
-
-// ProposalMsgs returns all the protocolpool msgs used to simulate governance proposals.
-func (AppModule) ProposalMsgs(simState module.SimulationState) []simtypes.WeightedProposalMsg {
-	return simulation.ProposalMsgs()
-}
-
-// WeightedOperations returns the all the protocolpool module operations with their respective weights.
-func (am AppModule) WeightedOperations(simState module.SimulationState) []simtypes.WeightedOperation {
-	return simulation.WeightedOperations(
-		simState.AppParams, simState.Cdc, simState.TxConfig,
-		am.accountKeeper, am.bankKeeper, am.keeper,
-	)
 }

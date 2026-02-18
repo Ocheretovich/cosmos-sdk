@@ -3,16 +3,16 @@ package v2
 import (
 	"context"
 
-	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/store/prefix"
-	"cosmossdk.io/x/feegrant"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/runtime"
+	"github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/feegrant"
 )
 
-func addAllowancesByExpTimeQueue(ctx context.Context, env appmodule.Environment, store store.KVStore, cdc codec.BinaryCodec) error {
+func addAllowancesByExpTimeQueue(ctx context.Context, store store.KVStore, cdc codec.BinaryCodec) error {
 	prefixStore := prefix.NewStore(runtime.KVStoreAdapter(store), FeeAllowanceKeyPrefix)
 	iterator := prefixStore.Iterator(nil, nil)
 	defer iterator.Close()
@@ -37,7 +37,7 @@ func addAllowancesByExpTimeQueue(ctx context.Context, env appmodule.Environment,
 		if exp != nil {
 			// store key is not changed in 0.46
 			key := iterator.Key()
-			if exp.Before(env.HeaderService.HeaderInfo(ctx).Time) {
+			if exp.Before(types.UnwrapSDKContext(ctx).BlockTime()) {
 				prefixStore.Delete(key)
 			} else {
 				grantByExpTimeQueueKey := FeeAllowancePrefixQueue(exp, key)
@@ -52,7 +52,7 @@ func addAllowancesByExpTimeQueue(ctx context.Context, env appmodule.Environment,
 	return nil
 }
 
-func MigrateStore(ctx context.Context, env appmodule.Environment, cdc codec.BinaryCodec) error {
-	store := env.KVStoreService.OpenKVStore(ctx)
-	return addAllowancesByExpTimeQueue(ctx, env, store, cdc)
+func MigrateStore(ctx context.Context, storeService store.KVStoreService, cdc codec.BinaryCodec) error {
+	kvStore := storeService.OpenKVStore(ctx)
+	return addAllowancesByExpTimeQueue(ctx, kvStore, cdc)
 }

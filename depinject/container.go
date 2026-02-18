@@ -71,6 +71,9 @@ func (c *container) call(provider *providerDescriptor, moduleKey *moduleKey) ([]
 	c.indentLogger()
 	inVals := make([]reflect.Value, len(provider.Inputs))
 	for i, in := range provider.Inputs {
+		if in.Ignored {
+			continue
+		}
 		val, err := c.resolve(in, moduleKey, loc)
 		if err != nil {
 			return nil, err
@@ -294,7 +297,7 @@ func (c *container) addNode(provider *providerDescriptor, key *moduleKey) (inter
 	}
 
 	if hasOwnModuleKeyParam {
-		return nil, fmt.Errorf("%T and %T must not be declared as dependencies on the same provided",
+		return nil, fmt.Errorf("%T and %T must not be declared as dependencies on the same provider",
 			ModuleKey{}, OwnModuleKey{})
 	}
 

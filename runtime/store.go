@@ -4,8 +4,6 @@ import (
 	"context"
 	"io"
 
-	dbm "github.com/cosmos/cosmos-db"
-
 	"cosmossdk.io/core/store"
 	storetypes "cosmossdk.io/store/types"
 
@@ -24,12 +22,12 @@ func (k kvStoreService) OpenKVStore(ctx context.Context) store.KVStore {
 	return newKVStore(sdk.UnwrapSDKContext(ctx).KVStore(k.key))
 }
 
-type memStoreService struct {
-	key *storetypes.MemoryStoreKey
-}
-
 func NewMemStoreService(storeKey *storetypes.MemoryStoreKey) store.MemoryStoreService {
 	return &memStoreService{key: storeKey}
+}
+
+type memStoreService struct {
+	key *storetypes.MemoryStoreKey
 }
 
 func (m memStoreService) OpenMemoryStore(ctx context.Context) store.KVStore {
@@ -46,20 +44,6 @@ type transientStoreService struct {
 
 func (t transientStoreService) OpenTransientStore(ctx context.Context) store.KVStore {
 	return newKVStore(sdk.UnwrapSDKContext(ctx).KVStore(t.key))
-}
-
-type failingStoreService struct{}
-
-func (failingStoreService) OpenKVStore(ctx context.Context) store.KVStore {
-	panic("kv store service not available for this module: verify runtime `skip_store_keys` app config if not expected")
-}
-
-func (failingStoreService) OpenMemoryStore(ctx context.Context) store.KVStore {
-	panic("memory kv store service not available for this module: verify runtime `skip_store_keys` app config if not expected")
-}
-
-func (failingStoreService) OpenTransientStore(ctx context.Context) store.KVStore {
-	panic("transient kv store service not available for this module: verify runtime `skip_store_keys` app config if not expected")
 }
 
 // CoreKVStore is a wrapper of Core/Store kvstore interface
@@ -164,7 +148,7 @@ func (s kvStoreAdapter) Set(key, value []byte) {
 	}
 }
 
-func (s kvStoreAdapter) Iterator(start, end []byte) dbm.Iterator {
+func (s kvStoreAdapter) Iterator(start, end []byte) storetypes.Iterator {
 	it, err := s.store.Iterator(start, end)
 	if err != nil {
 		panic(err)
@@ -172,7 +156,7 @@ func (s kvStoreAdapter) Iterator(start, end []byte) dbm.Iterator {
 	return it
 }
 
-func (s kvStoreAdapter) ReverseIterator(start, end []byte) dbm.Iterator {
+func (s kvStoreAdapter) ReverseIterator(start, end []byte) storetypes.Iterator {
 	it, err := s.store.ReverseIterator(start, end)
 	if err != nil {
 		panic(err)

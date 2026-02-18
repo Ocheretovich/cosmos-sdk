@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,18 +16,18 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"cosmossdk.io/log"
-	auth "cosmossdk.io/x/auth/client/cli"
+	"cosmossdk.io/log/v2"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
-	"github.com/cosmos/cosmos-sdk/client/rpc"
+	rpc "github.com/cosmos/cosmos-sdk/client/rpc"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
 	"github.com/cosmos/cosmos-sdk/version"
+	auth "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
 )
 
 // StatusCommand returns the command to return the status of the network.
@@ -52,7 +51,7 @@ func StatusCommand() *cobra.Command {
 				return err
 			}
 
-			// In order to maintain backwards compatibility, the default json format output
+			// In order to maintain backwards compatibility, the default json format output is used
 			outputFormat, _ := cmd.Flags().GetString(flags.FlagOutput)
 			if outputFormat == flags.OutputFormatJSON {
 				clientCtx = clientCtx.WithOutputFormat(flags.OutputFormatJSON)
@@ -156,7 +155,7 @@ func VersionCmd() *cobra.Command {
 				BlockProtocol uint64
 				P2PProtocol   uint64
 			}{
-				CometBFT:      cmtversion.CMTSemVer,
+				CometBFT:      cmtversion.TMCoreSemVer,
 				ABCI:          cmtversion.ABCIVersion,
 				BlockProtocol: cmtversion.BlockProtocol,
 				P2PProtocol:   cmtversion.P2PProtocol,
@@ -279,7 +278,7 @@ $ %s query block --%s=%s <hash>
 			case auth.TypeHash:
 
 				if args[0] == "" {
-					return errors.New("argument should be a tx hash")
+					return fmt.Errorf("argument should be a tx hash")
 				}
 
 				// If hash is given, then query the tx by hash.
@@ -361,7 +360,7 @@ func QueryBlockResultsCmd() *cobra.Command {
 	return cmd
 }
 
-func BootstrapStateCmd[T types.Application](appCreator types.AppCreator[T]) *cobra.Command {
+func BootstrapStateCmd(appCreator types.AppCreator) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bootstrap-state",
 		Short: "Bootstrap CometBFT state at an arbitrary block height using a light client",
@@ -377,7 +376,7 @@ func BootstrapStateCmd[T types.Application](appCreator types.AppCreator[T]) *cob
 			}
 			if height == 0 {
 				home := serverCtx.Viper.GetString(flags.FlagHome)
-				db, err := OpenDB(home, GetAppDBBackend(serverCtx.Viper))
+				db, err := openDB(home, GetAppDBBackend(serverCtx.Viper))
 				if err != nil {
 					return err
 				}
@@ -386,7 +385,7 @@ func BootstrapStateCmd[T types.Application](appCreator types.AppCreator[T]) *cob
 				height = app.CommitMultiStore().LastCommitID().Version
 			}
 
-			return node.BootstrapState(cmd.Context(), cfg, cmtcfg.DefaultDBProvider, getGenDocProvider(cfg), uint64(height), nil)
+			return node.BootstrapStateWithGenProvider(cmd.Context(), cfg, cmtcfg.DefaultDBProvider, getGenDocProvider(cfg), uint64(height), nil)
 		},
 	}
 

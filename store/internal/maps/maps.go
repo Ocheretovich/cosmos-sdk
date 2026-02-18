@@ -1,11 +1,11 @@
 package maps
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 
-	cmtprotocrypto "github.com/cometbft/cometbft/api/cometbft/crypto/v1"
 	"github.com/cometbft/cometbft/crypto/merkle"
+	"github.com/cometbft/cometbft/crypto/tmhash"
+	cmtprotocrypto "github.com/cometbft/cometbft/proto/tendermint/crypto"
 
 	"cosmossdk.io/store/internal/kv"
 	"cosmossdk.io/store/internal/tree"
@@ -25,7 +25,7 @@ func newMerkleMap() *merkleMap {
 	}
 }
 
-// Set creates a kv.Pair from the provided key and value. The value is hashed prior
+// set creates a kv.Pair from the provided key and value. The value is hashed prior
 // to creating a kv.Pair. The created kv.Pair is appended to the MerkleMap's slice
 // of kv.Pairs. Whenever called, the MerkleMap must be resorted.
 func (sm *merkleMap) set(key string, value []byte) {
@@ -36,15 +36,15 @@ func (sm *merkleMap) set(key string, value []byte) {
 
 	// The value is hashed, so you can check for equality with a cached value (say)
 	// and make a determination to fetch or not.
-	vhash := sha256.Sum256(value)
+	vhash := tmhash.Sum(value)
 
 	sm.kvs.Pairs = append(sm.kvs.Pairs, kv.Pair{
 		Key:   byteKey,
-		Value: vhash[:],
+		Value: vhash,
 	})
 }
 
-// Hash returns the merkle root of items sorted by key. Note, it is unstable.
+// hash returns the merkle root of items sorted by key. Note, it is unstable.
 func (sm *merkleMap) hash() []byte {
 	sm.sort()
 	return hashKVPairs(sm.kvs)
@@ -97,11 +97,11 @@ func (sm *simpleMap) Set(key string, value []byte) {
 	// The value is hashed, so you can
 	// check for equality with a cached value (say)
 	// and make a determination to fetch or not.
-	vhash := sha256.Sum256(value)
+	vhash := tmhash.Sum(value)
 
 	sm.Kvs.Pairs = append(sm.Kvs.Pairs, kv.Pair{
 		Key:   byteKey,
-		Value: vhash[:],
+		Value: vhash,
 	})
 }
 
@@ -156,7 +156,7 @@ func (kv KVPair) Bytes() []byte {
 	// * 8 bytes to Uvarint encode the length of the value
 	// So preallocate for the worst case, which will in total
 	// be a maximum of 14 bytes wasted, if len(key)=1, len(value)=1,
-	// but that's going to rare.
+	// but that's going to be rare.
 	buf := make([]byte, 8+len(kv.Key)+8+len(kv.Value))
 
 	// Encode the key, prefixed with its length.

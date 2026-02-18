@@ -3,7 +3,6 @@ package keyring
 import (
 	"bufio"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/99designs/keyring"
+	"github.com/cockroachdb/errors"
 	"github.com/cosmos/go-bip39"
 	"golang.org/x/crypto/bcrypt"
 
@@ -50,31 +50,28 @@ const (
 )
 
 var (
-	_                          Keyring = &keystore{}
-	maxPassphraseEntryAttempts         = 3
+	_                          Keyring       = &keystore{}
+	_                          KeyringWithDB = &keystore{}
+	maxPassphraseEntryAttempts               = 3
 )
 
 // Keyring exposes operations over a backend supported by github.com/99designs/keyring.
 type Keyring interface {
-	// Backend get the backend type used in the keyring config: "file", "os", "kwallet", "pass", "test", "memory".
+	// Get the backend type used in the keyring config: "file", "os", "kwallet", "pass", "test", "memory".
 	Backend() string
-
-	// DB get the db keyring used in the keystore.
-	DB() keyring.Keyring
-
 	// List all keys.
 	List() ([]*Record, error)
 
-	// SupportedAlgorithms supported signing algorithms for Keyring and Ledger respectively.
+	// Supported signing algorithms for Keyring and Ledger respectively.
 	SupportedAlgorithms() (SigningAlgoList, SigningAlgoList)
 
 	// Key and KeyByAddress return keys by uid and address respectively.
 	Key(uid string) (*Record, error)
-	KeyByAddress(address []byte) (*Record, error)
+	KeyByAddress(address sdk.Address) (*Record, error)
 
 	// Delete and DeleteByAddress remove keys from the keyring.
 	Delete(uid string) error
-	DeleteByAddress(address []byte) error
+	DeleteByAddress(address sdk.Address) error
 
 	// Rename an existing key from the Keyring
 	Rename(from, to string) error
@@ -108,13 +105,20 @@ type Keyring interface {
 	Migrator
 }
 
+type KeyringWithDB interface { //nolint: revive // we can ignore this, as this type is being used
+	Keyring
+
+	// Get the db keyring used in the keystore.
+	DB() keyring.Keyring
+}
+
 // Signer is implemented by key stores that want to provide signing capabilities.
 type Signer interface {
 	// Sign sign byte messages with a user key.
 	Sign(uid string, msg []byte, signMode signing.SignMode) ([]byte, types.PubKey, error)
 
 	// SignByAddress sign byte messages with a user key providing the address.
-	SignByAddress(address, msg []byte, signMode signing.SignMode) ([]byte, types.PubKey, error)
+	SignByAddress(address sdk.Address, msg []byte, signMode signing.SignMode) ([]byte, types.PubKey, error)
 }
 
 // Importer is implemented by key stores that support import of public and private keys.
@@ -134,35 +138,18 @@ type Migrator interface {
 
 // Exporter is implemented by key stores that support export of public and private keys.
 type Exporter interface {
-	// ExportPubKeyArmor export public key
+	// Export public key
 	ExportPubKeyArmor(uid string) (string, error)
-	ExportPubKeyArmorByAddress(address []byte) (string, error)
+	ExportPubKeyArmorByAddress(address sdk.Address) (string, error)
 
 	// ExportPrivKeyArmor returns a private key in ASCII armored format.
 	// It returns an error if the key does not exist or a wrong encryption passphrase is supplied.
 	ExportPrivKeyArmor(uid, encryptPassphrase string) (armor string, err error)
-	ExportPrivKeyArmorByAddress(address []byte, encryptPassphrase string) (armor string, err error)
+	ExportPrivKeyArmorByAddress(address sdk.Address, encryptPassphrase string) (armor string, err error)
 }
 
 // Option overrides keyring configuration options.
 type Option func(options *Options)
-
-// Options define the options of the Keyring.
-type Options struct {
-	// supported signing algorithms for keyring
-	SupportedAlgos SigningAlgoList
-	// supported signing algorithms for Ledger
-	SupportedAlgosLedger SigningAlgoList
-	// define Ledger Derivation function
-	LedgerDerivation func() (ledger.SECP256K1, error)
-	// define Ledger key generation function
-	LedgerCreateKey func([]byte) types.PubKey
-	// define Ledger app name
-	LedgerAppName string
-	// indicate whether Ledger should skip DER Conversion on signature,
-	// depending on which format (DER or BER) the Ledger app returns signatures
-	LedgerSigSkipDERConv bool
-}
 
 // NewInMemory creates a transient keyring useful for testing
 // purposes and on-the-fly key generation.
@@ -180,7 +167,7 @@ func NewInMemoryWithKeyring(kr keyring.Keyring, cdc codec.Codec, opts ...Option)
 // New creates a new instance of a keyring.
 // Keyring options can be applied when generating the new instance.
 // Available backends are "os", "file", "kwallet", "memory", "pass", "test".
-func New(
+func newKeyringGeneric(
 	appName, backend, rootDir string, userInput io.Reader, cdc codec.Codec, opts ...Option,
 ) (Keyring, error) {
 	var (
@@ -202,7 +189,7 @@ func New(
 	case BackendPass:
 		db, err = keyring.Open(newPassBackendKeyringConfig(appName, rootDir, userInput))
 	default:
-		return nil, errorsmod.Wrap(ErrUnknownBacked, backend)
+		return nil, errorsmod.Wrap(ErrUnknownBackend, backend)
 	}
 
 	if err != nil {
@@ -260,11 +247,6 @@ func (ks keystore) Backend() string {
 	return ks.backend
 }
 
-// DB returns the db keyring used in the keystore
-func (ks keystore) DB() keyring.Keyring {
-	return ks.db
-}
-
 func (ks keystore) ExportPubKeyArmor(uid string) (string, error) {
 	k, err := ks.Key(uid)
 	if err != nil {
@@ -284,7 +266,12 @@ func (ks keystore) ExportPubKeyArmor(uid string) (string, error) {
 	return crypto.ArmorPubKeyBytes(bz, key.Type()), nil
 }
 
-func (ks keystore) ExportPubKeyArmorByAddress(address []byte) (string, error) {
+// DB returns the db keyring used in the keystore
+func (ks keystore) DB() keyring.Keyring {
+	return ks.db
+}
+
+func (ks keystore) ExportPubKeyArmorByAddress(address sdk.Address) (string, error) {
 	k, err := ks.KeyByAddress(address)
 	if err != nil {
 		return "", err
@@ -318,7 +305,7 @@ func (ks keystore) ExportPrivateKeyObject(uid string) (types.PrivKey, error) {
 	return priv, err
 }
 
-func (ks keystore) ExportPrivKeyArmorByAddress(address []byte, encryptPassphrase string) (armor string, err error) {
+func (ks keystore) ExportPrivKeyArmorByAddress(address sdk.Address, encryptPassphrase string) (armor string, err error) {
 	k, err := ks.KeyByAddress(address)
 	if err != nil {
 		return "", err
@@ -426,7 +413,7 @@ func (ks keystore) Sign(uid string, msg []byte, signMode signing.SignMode) ([]by
 	}
 }
 
-func (ks keystore) SignByAddress(address, msg []byte, signMode signing.SignMode) ([]byte, types.PubKey, error) {
+func (ks keystore) SignByAddress(address sdk.Address, msg []byte, signMode signing.SignMode) ([]byte, types.PubKey, error) {
 	k, err := ks.KeyByAddress(address)
 	if err != nil {
 		return nil, nil, err
@@ -444,7 +431,7 @@ func (ks keystore) SaveLedgerKey(uid string, algo SignatureAlgo, hrp string, coi
 
 	priv, _, err := ledger.NewPrivKeySecp256k1(*hdPath, hrp)
 	if err != nil {
-		return nil, errorsmod.Wrap(ErrLedgerGenerateKey, err.Error())
+		return nil, errors.CombineErrors(ErrLedgerGenerateKey, err)
 	}
 
 	return ks.writeLedgerKey(uid, priv.PubKey(), hdPath)
@@ -467,7 +454,7 @@ func (ks keystore) SaveOfflineKey(uid string, pubkey types.PubKey) (*Record, err
 	return ks.writeOfflineKey(uid, pubkey)
 }
 
-func (ks keystore) DeleteByAddress(address []byte) error {
+func (ks keystore) DeleteByAddress(address sdk.Address) error {
 	k, err := ks.KeyByAddress(address)
 	if err != nil {
 		return err
@@ -529,14 +516,14 @@ func (ks keystore) Delete(uid string) error {
 	return nil
 }
 
-func (ks keystore) KeyByAddress(address []byte) (*Record, error) {
+func (ks keystore) KeyByAddress(address sdk.Address) (*Record, error) {
 	ik, err := ks.db.Get(addrHexKeyAsString(address))
 	if err != nil {
-		return nil, wrapKeyNotFound(err, "key with given address not found") // we do not print the address for not needing an address codec
+		return nil, wrapKeyNotFound(err, fmt.Sprintf("key with address %s not found", address.String()))
 	}
 
 	if len(ik.Data) == 0 {
-		return nil, wrapKeyNotFound(err, "key with given address not found") // we do not print the address for not needing an address codec
+		return nil, wrapKeyNotFound(err, fmt.Sprintf("key with address %s not found", address.String()))
 	}
 
 	return ks.Key(string(ik.Data))
@@ -788,7 +775,7 @@ func newRealPrompt(dir string, buf io.Reader) func(string) (string, error) {
 			}
 
 			if pass != reEnteredPass {
-				fmt.Fprintln(os.Stderr, "passphrase do not match")
+				fmt.Fprintln(os.Stderr, "passphrase does not match")
 				continue
 			}
 
@@ -839,7 +826,7 @@ func (ks keystore) writeRecord(k *Record) error {
 
 	serializedRecord, err := ks.cdc.Marshal(k)
 	if err != nil {
-		return errorsmod.Wrap(ErrUnableToSerialize, err.Error())
+		return errors.CombineErrors(ErrUnableToSerialize, err)
 	}
 
 	item := keyring.Item{
@@ -866,7 +853,7 @@ func (ks keystore) writeRecord(k *Record) error {
 // existsInDb returns (true, nil) if either addr or name exist is in keystore DB.
 // On the other hand, it returns (false, error) if Get method returns error different from keyring.ErrKeyNotFound
 // In case of inconsistent keyring, it recovers it automatically.
-func (ks keystore) existsInDb(addr []byte, name string) (bool, error) {
+func (ks keystore) existsInDb(addr sdk.Address, name string) (bool, error) {
 	_, errAddr := ks.db.Get(addrHexKeyAsString(addr))
 	if errAddr != nil && !errors.Is(errAddr, keyring.ErrKeyNotFound) {
 		return false, errAddr
@@ -881,7 +868,7 @@ func (ks keystore) existsInDb(addr []byte, name string) (bool, error) {
 
 	// looking for an issue, record with meta (getByAddress) exists, but record with public key itself does not
 	if errAddr == nil && errors.Is(errInfo, keyring.ErrKeyNotFound) {
-		fmt.Fprintf(os.Stderr, "address \"%s\" exists but pubkey itself does not\n", hex.EncodeToString(addr))
+		fmt.Fprintf(os.Stderr, "address \"%s\" exists but pubkey itself does not\n", hex.EncodeToString(addr.Bytes()))
 		fmt.Fprintln(os.Stderr, "recreating pubkey record")
 		err := ks.db.Remove(addrHexKeyAsString(addr))
 		if err != nil {
@@ -903,7 +890,7 @@ func (ks keystore) writeOfflineKey(name string, pk types.PubKey) (*Record, error
 	return k, ks.writeRecord(k)
 }
 
-// writeMultisigKey investigate where thisf function is called maybe remove it
+// writeMultisigKey investigate where this function is called maybe remove it
 func (ks keystore) writeMultisigKey(name string, pk types.PubKey) (*Record, error) {
 	k, err := NewMultiRecord(name, pk)
 	if err != nil {
@@ -994,7 +981,7 @@ func (ks keystore) migrate(key string) (*Record, error) {
 
 	serializedRecord, err := ks.cdc.Marshal(k)
 	if err != nil {
-		return nil, errorsmod.Wrap(ErrUnableToSerialize, err.Error())
+		return nil, errors.CombineErrors(ErrUnableToSerialize, err)
 	}
 
 	item = keyring.Item{
@@ -1058,6 +1045,6 @@ func (ks keystore) convertFromLegacyInfo(info LegacyInfo) (*Record, error) {
 	}
 }
 
-func addrHexKeyAsString(address []byte) string {
-	return fmt.Sprintf("%s.%s", hex.EncodeToString(address), addressSuffix)
+func addrHexKeyAsString(address sdk.Address) string {
+	return fmt.Sprintf("%s.%s", hex.EncodeToString(address.Bytes()), addressSuffix)
 }

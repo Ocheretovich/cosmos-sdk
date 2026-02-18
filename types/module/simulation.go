@@ -6,8 +6,6 @@ import (
 	"sort"
 	"time"
 
-	"cosmossdk.io/core/address"
-	"cosmossdk.io/core/appmodule"
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/client"
@@ -63,7 +61,7 @@ func NewSimulationManager(modules ...AppModuleSimulation) *SimulationManager {
 // with the same moduleName.
 // Then it attempts to cast every provided AppModule into an AppModuleSimulation.
 // If the cast succeeds, its included, otherwise it is excluded.
-func NewSimulationManagerFromAppModules(modules map[string]appmodule.AppModule, overrideModules map[string]AppModuleSimulation) *SimulationManager {
+func NewSimulationManagerFromAppModules(modules map[string]any, overrideModules map[string]AppModuleSimulation) *SimulationManager {
 	simModules := []AppModuleSimulation{}
 	appModuleNamesSorted := make([]string, 0, len(modules))
 	for moduleName := range modules {
@@ -146,8 +144,6 @@ func (sm *SimulationManager) WeightedOperations(simState SimulationState) []simu
 type SimulationState struct {
 	AppParams         simulation.AppParams
 	Cdc               codec.JSONCodec                // application codec
-	AddressCodec      address.Codec                  // address codec
-	ValidatorCodec    address.Codec                  // validator address codec
 	TxConfig          client.TxConfig                // Shared TxConfig; this is expensive to create and stateless, so create it once up front.
 	Rand              *rand.Rand                     // random number
 	GenState          map[string]json.RawMessage     // genesis state

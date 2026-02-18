@@ -3,186 +3,362 @@ package keeper_test
 import (
 	"testing"
 
-	"github.com/golang/mock/gomock"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"cosmossdk.io/math"
-	authtypes "cosmossdk.io/x/auth/types"
-	"cosmossdk.io/x/distribution/keeper"
-	distrtestutil "cosmossdk.io/x/distribution/testutil"
-	"cosmossdk.io/x/distribution/types"
-	stakingtypes "cosmossdk.io/x/staking/types"
+	storetypes "cosmossdk.io/store/types"
 
-	codectestutil "github.com/cosmos/cosmos-sdk/codec/testutil"
+	"github.com/cosmos/cosmos-sdk/codec/address"
+	"github.com/cosmos/cosmos-sdk/runtime"
+	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	"github.com/cosmos/cosmos-sdk/x/distribution"
+	"github.com/cosmos/cosmos-sdk/x/distribution/keeper"
+	distrtestutil "github.com/cosmos/cosmos-sdk/x/distribution/testutil"
+	disttypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
-func TestQueryParams(t *testing.T) {
-	ctx, _, distrKeeper, _ := initFixture(t)
-	queryServer := keeper.NewQuerier(distrKeeper)
+type validatorQueryTestFixture struct {
+	ctx         sdk.Context
+	distrKeeper keeper.Keeper
+	querier     keeper.Querier
+	valAddr     sdk.ValAddress
+	addr        sdk.AccAddress
+	val         stakingtypes.Validator
+}
 
-	cases := []struct {
-		name   string
-		req    *types.QueryParamsRequest
-		resp   *types.QueryParamsResponse
-		errMsg string
-	}{
-		{
-			name: "success",
-			req:  &types.QueryParamsRequest{},
-			resp: &types.QueryParamsResponse{
-				Params: types.DefaultParams(),
-			},
-			errMsg: "",
-		},
+func setupValidatorQueryTest(t *testing.T, expectNonExistentValidator bool) *validatorQueryTestFixture {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	key := storetypes.NewKVStoreKey(disttypes.StoreKey)
+	storeService := runtime.NewKVStoreService(key)
+	testCtx := testutil.DefaultContextWithDB(t, key, storetypes.NewTransientStoreKey("transient_test"))
+	encCfg := moduletestutil.MakeTestEncodingConfig(distribution.AppModuleBasic{})
+	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{Height: 1})
+
+	bankKeeper := distrtestutil.NewMockBankKeeper(ctrl)
+	stakingKeeper := distrtestutil.NewMockStakingKeeper(ctrl)
+	accountKeeper := distrtestutil.NewMockAccountKeeper(ctrl)
+
+	accountKeeper.EXPECT().GetModuleAddress("distribution").Return(distrAcc.GetAddress())
+	stakingKeeper.EXPECT().ValidatorAddressCodec().Return(address.NewBech32Codec(sdk.Bech32PrefixValAddr)).AnyTimes()
+	accountKeeper.EXPECT().AddressCodec().Return(address.NewBech32Codec(sdk.Bech32MainPrefix)).AnyTimes()
+
+	distrKeeper := keeper.NewKeeper(
+		encCfg.Codec,
+		storeService,
+		accountKeeper,
+		bankKeeper,
+		stakingKeeper,
+		"fee_collector",
+		authtypes.NewModuleAddress("gov").String(),
+	)
+
+	require.NoError(t, distrKeeper.FeePool.Set(ctx, disttypes.InitialFeePool()))
+	require.NoError(t, distrKeeper.Params.Set(ctx, disttypes.DefaultParams()))
+
+	valAddr := sdk.ValAddress(valConsAddr0)
+	addr := sdk.AccAddress(valAddr)
+	val, err := distrtestutil.CreateValidator(valConsPk0, math.NewInt(1000))
+	require.NoError(t, err)
+	val.Commission = stakingtypes.NewCommission(math.LegacyNewDecWithPrec(5, 1), math.LegacyNewDecWithPrec(5, 1), math.LegacyNewDec(0))
+
+	del := stakingtypes.NewDelegation(addr.String(), valAddr.String(), val.DelegatorShares)
+
+	stakingKeeper.EXPECT().Validator(gomock.Any(), valAddr).Return(val, nil).AnyTimes()
+	if expectNonExistentValidator {
+		stakingKeeper.EXPECT().Validator(gomock.Any(), gomock.Not(gomock.Eq(valAddr))).Return(nil, nil).AnyTimes()
 	}
+	stakingKeeper.EXPECT().Delegation(gomock.Any(), addr, valAddr).Return(del, nil).AnyTimes()
 
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := queryServer.Params(ctx, tc.req)
-			if tc.errMsg == "" {
-				require.NoError(t, err)
-				require.Equal(t, tc.resp, out)
-			} else {
-				require.Error(t, err)
-				require.Contains(t, err.Error(), tc.errMsg)
-				require.Nil(t, out)
-			}
-		})
+	err = distrtestutil.CallCreateValidatorHooks(ctx, distrKeeper, addr, valAddr)
+	require.NoError(t, err)
+
+	return &validatorQueryTestFixture{
+		ctx:         ctx,
+		distrKeeper: distrKeeper,
+		querier:     keeper.NewQuerier(distrKeeper),
+		valAddr:     valAddr,
+		addr:        addr,
+		val:         val,
 	}
 }
 
-func TestQueryValidatorDistributionInfo(t *testing.T) {
-	ctx, addrs, distrKeeper, dep := initFixture(t)
-	queryServer := keeper.NewQuerier(distrKeeper)
-	operatorAddr, err := codectestutil.CodecOptions{}.GetValidatorCodec().BytesToString(valConsPk0.Address())
+func (f *validatorQueryTestFixture) allocateRewardsAndIncrementPeriod(t *testing.T, amount int64) {
+	t.Helper()
+	tokens := sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(amount)}}
+	require.NoError(t, f.distrKeeper.AllocateTokensToValidator(f.ctx, f.val, tokens))
+	f.ctx = f.ctx.WithBlockHeight(f.ctx.BlockHeight() + 1)
+	_, err := f.distrKeeper.IncrementValidatorPeriod(f.ctx, f.val)
 	require.NoError(t, err)
-	val, err := distrtestutil.CreateValidator(valConsPk0, operatorAddr, math.NewInt(100))
-	require.NoError(t, err)
+}
 
-	addr0Str, err := codectestutil.CodecOptions{}.GetAddressCodec().BytesToString(addrs[0])
-	require.NoError(t, err)
+func TestQueryValidatorHistoricalRewards(t *testing.T) {
+	f := setupValidatorQueryTest(t, false)
+	f.allocateRewardsAndIncrementPeriod(t, 100)
+	f.allocateRewardsAndIncrementPeriod(t, 200)
 
-	del := stakingtypes.NewDelegation(addr0Str, val.OperatorAddress, val.DelegatorShares)
-
-	dep.stakingKeeper.EXPECT().Validator(gomock.Any(), gomock.Any()).Return(val, nil).AnyTimes()
-	dep.stakingKeeper.EXPECT().Delegation(gomock.Any(), gomock.Any(), gomock.Any()).Return(del, nil).AnyTimes()
-
-	cases := []struct {
-		name   string
-		req    *types.QueryValidatorDistributionInfoRequest
-		resp   *types.QueryValidatorDistributionInfoResponse
-		errMsg string
+	testCases := []struct {
+		name               string
+		req                *disttypes.QueryValidatorHistoricalRewardsRequest
+		expectErr          bool
+		errContains        string
+		expectedRefCount   uint32
+		expectNonZeroRatio bool
 	}{
+		{
+			name: "period 1 has reference count 1",
+			req: &disttypes.QueryValidatorHistoricalRewardsRequest{
+				ValidatorAddress: f.valAddr.String(),
+				Period:           1,
+			},
+			expectErr:          false,
+			expectedRefCount:   1,
+			expectNonZeroRatio: false,
+		},
+		{
+			name: "period 2 deleted (reference count 0)",
+			req: &disttypes.QueryValidatorHistoricalRewardsRequest{
+				ValidatorAddress: f.valAddr.String(),
+				Period:           2,
+			},
+			expectErr:          false,
+			expectedRefCount:   0,
+			expectNonZeroRatio: false,
+		},
+		{
+			name: "period 3 is current with rewards",
+			req: &disttypes.QueryValidatorHistoricalRewardsRequest{
+				ValidatorAddress: f.valAddr.String(),
+				Period:           3,
+			},
+			expectErr:          false,
+			expectedRefCount:   1,
+			expectNonZeroRatio: true,
+		},
+		{
+			name:        "nil request",
+			req:         nil,
+			expectErr:   true,
+			errContains: "invalid request",
+		},
+		{
+			name: "empty validator address",
+			req: &disttypes.QueryValidatorHistoricalRewardsRequest{
+				ValidatorAddress: "",
+				Period:           0,
+			},
+			expectErr:   true,
+			errContains: "empty validator address",
+		},
 		{
 			name: "invalid validator address",
-			req: &types.QueryValidatorDistributionInfoRequest{
-				ValidatorAddress: "invalid address",
+			req: &disttypes.QueryValidatorHistoricalRewardsRequest{
+				ValidatorAddress: "invalid",
+				Period:           0,
 			},
-			resp:   &types.QueryValidatorDistributionInfoResponse{},
-			errMsg: "decoding bech32 failed",
+			expectErr: true,
 		},
 		{
-			name: "not a validator",
-			req: &types.QueryValidatorDistributionInfoRequest{
-				ValidatorAddress: addr0Str,
+			name: "non-existent period returns empty",
+			req: &disttypes.QueryValidatorHistoricalRewardsRequest{
+				ValidatorAddress: f.valAddr.String(),
+				Period:           999,
 			},
-			resp:   &types.QueryValidatorDistributionInfoResponse{},
-			errMsg: `expected 'cosmosvaloper' got 'cosmos'`,
+			expectErr:          false,
+			expectedRefCount:   0,
+			expectNonZeroRatio: false,
 		},
 	}
 
-	for _, tc := range cases {
-		tc := tc
+	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := queryServer.ValidatorDistributionInfo(ctx, tc.req)
-			if tc.errMsg == "" {
-				require.NoError(t, err)
-				require.Equal(t, tc.resp, out)
-			} else {
+			resp, err := f.querier.ValidatorHistoricalRewards(f.ctx, tc.req)
+			if tc.expectErr {
 				require.Error(t, err)
-				require.Contains(t, err.Error(), tc.errMsg)
-				require.Nil(t, out)
+				if tc.errContains != "" {
+					require.Contains(t, err.Error(), tc.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				require.Equal(t, tc.expectedRefCount, resp.Rewards.ReferenceCount)
+				if tc.expectNonZeroRatio {
+					require.False(t, resp.Rewards.CumulativeRewardRatio.IsZero())
+				} else {
+					require.True(t, resp.Rewards.CumulativeRewardRatio.IsZero())
+				}
 			}
 		})
 	}
 }
 
-func TestQueryValidatorOutstandingRewards(t *testing.T) {
-	// TODO https://github.com/cosmos/cosmos-sdk/issues/16757
-	// currently tested in tests/e2e/distribution/grpc_query_suite.go
-}
+func TestQueryValidatorCurrentRewards(t *testing.T) {
+	f := setupValidatorQueryTest(t, true)
+	f.allocateRewardsAndIncrementPeriod(t, 100)
 
-func TestQueryValidatorCommission(t *testing.T) {
-	// TODO https://github.com/cosmos/cosmos-sdk/issues/16757
-	// currently tested in tests/e2e/distribution/grpc_query_suite.go
-}
-
-func TestQueryValidatorSlashes(t *testing.T) {
-	// TODO https://github.com/cosmos/cosmos-sdk/issues/16757
-	// currently tested in tests/e2e/distribution/grpc_query_suite.go
-}
-
-func TestQueryDelegationRewards(t *testing.T) {
-	// TODO https://github.com/cosmos/cosmos-sdk/issues/16757
-	// currently tested in tests/e2e/distribution/grpc_query_suite.go
-}
-
-func TestQueryDelegationTotalRewards(t *testing.T) {
-	// TODO https://github.com/cosmos/cosmos-sdk/issues/16757
-	// currently tested in tests/e2e/distribution/grpc_query_suite.go
-}
-
-func TestQueryDelegatorValidators(t *testing.T) {
-	// TODO https://github.com/cosmos/cosmos-sdk/issues/16757
-	// currently tested in tests/e2e/distribution/grpc_query_suite.go
-}
-
-func TestQueryDelegatorWithdrawAddress(t *testing.T) {
-	// TODO https://github.com/cosmos/cosmos-sdk/issues/16757
-	// currently tested in tests/e2e/distribution/grpc_query_suite.go
-}
-
-func TestQueryCommunityPool(t *testing.T) {
-	ctx, _, distrKeeper, dep := initFixture(t)
-	queryServer := keeper.NewQuerier(distrKeeper)
-
-	poolAcc := authtypes.NewEmptyModuleAccount(types.ProtocolPoolModuleName)
-	dep.accountKeeper.EXPECT().GetModuleAccount(gomock.Any(), types.ProtocolPoolModuleName).Return(poolAcc).AnyTimes()
-
-	dep.bankKeeper.EXPECT().GetAllBalances(gomock.Any(), poolAcc.GetAddress()).Return(sdk.NewCoins(sdk.NewCoin("stake", math.NewInt(100))))
-
-	coins := sdk.NewCoins(sdk.NewCoin("stake", math.NewInt(100)))
-	decCoins := sdk.NewDecCoinsFromCoins(coins...)
-
-	cases := []struct {
-		name   string
-		req    *types.QueryCommunityPoolRequest  //nolint:staticcheck // Testing deprecated method
-		resp   *types.QueryCommunityPoolResponse //nolint:staticcheck // Testing deprecated method
-		errMsg string
+	testCases := []struct {
+		name                 string
+		req                  *disttypes.QueryValidatorCurrentRewardsRequest
+		expectErr            bool
+		errContains          string
+		expectedPeriod       uint64
+		expectNonZeroRewards bool
 	}{
 		{
-			name: "success",
-			req:  &types.QueryCommunityPoolRequest{}, //nolint:staticcheck // Testing deprecated method
-			resp: &types.QueryCommunityPoolResponse{ //nolint:staticcheck // Testing deprecated method
-				Pool: decCoins,
+			name: "valid validator with current rewards",
+			req: &disttypes.QueryValidatorCurrentRewardsRequest{
+				ValidatorAddress: f.valAddr.String(),
 			},
-			errMsg: "",
+			expectErr:            false,
+			expectedPeriod:       3,
+			expectNonZeroRewards: false,
+		},
+		{
+			name:        "nil request",
+			req:         nil,
+			expectErr:   true,
+			errContains: "invalid request",
+		},
+		{
+			name: "empty validator address",
+			req: &disttypes.QueryValidatorCurrentRewardsRequest{
+				ValidatorAddress: "",
+			},
+			expectErr:   true,
+			errContains: "empty validator address",
+		},
+		{
+			name: "invalid validator address",
+			req: &disttypes.QueryValidatorCurrentRewardsRequest{
+				ValidatorAddress: "invalid",
+			},
+			expectErr: true,
+		},
+		{
+			name: "non-existent validator",
+			req: &disttypes.QueryValidatorCurrentRewardsRequest{
+				ValidatorAddress: sdk.ValAddress([]byte("nonexistent")).String(),
+			},
+			expectErr:   true,
+			errContains: "validator does not exist",
 		},
 	}
 
-	for _, tc := range cases {
-		tc := tc
+	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := queryServer.CommunityPool(ctx, tc.req)
-			if tc.errMsg == "" {
-				require.NoError(t, err)
-				require.Equal(t, tc.resp, out)
-			} else {
+			resp, err := f.querier.ValidatorCurrentRewards(f.ctx, tc.req)
+			if tc.expectErr {
 				require.Error(t, err)
-				require.Contains(t, err.Error(), tc.errMsg)
-				require.Nil(t, out)
+				if tc.errContains != "" {
+					require.Contains(t, err.Error(), tc.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				require.Equal(t, tc.expectedPeriod, resp.Rewards.Period)
+				if tc.expectNonZeroRewards {
+					require.False(t, resp.Rewards.Rewards.IsZero())
+				} else {
+					require.True(t, resp.Rewards.Rewards.IsZero())
+				}
+			}
+		})
+	}
+}
+
+func TestQueryDelegatorStartingInfo(t *testing.T) {
+	f := setupValidatorQueryTest(t, true)
+	f.allocateRewardsAndIncrementPeriod(t, 100)
+
+	testCases := []struct {
+		name           string
+		req            *disttypes.QueryDelegatorStartingInfoRequest
+		expectErr      bool
+		errContains    string
+		expectedPeriod uint64
+		expectedHeight uint64
+	}{
+		{
+			name: "valid delegator and validator",
+			req: &disttypes.QueryDelegatorStartingInfoRequest{
+				DelegatorAddress: f.addr.String(),
+				ValidatorAddress: f.valAddr.String(),
+			},
+			expectErr:      false,
+			expectedPeriod: 1,
+			expectedHeight: 1,
+		},
+		{
+			name:        "nil request",
+			req:         nil,
+			expectErr:   true,
+			errContains: "invalid request",
+		},
+		{
+			name: "empty delegator address",
+			req: &disttypes.QueryDelegatorStartingInfoRequest{
+				DelegatorAddress: "",
+				ValidatorAddress: f.valAddr.String(),
+			},
+			expectErr:   true,
+			errContains: "empty delegator address",
+		},
+		{
+			name: "empty validator address",
+			req: &disttypes.QueryDelegatorStartingInfoRequest{
+				DelegatorAddress: f.addr.String(),
+				ValidatorAddress: "",
+			},
+			expectErr:   true,
+			errContains: "empty validator address",
+		},
+		{
+			name: "invalid delegator address",
+			req: &disttypes.QueryDelegatorStartingInfoRequest{
+				DelegatorAddress: "invalid",
+				ValidatorAddress: f.valAddr.String(),
+			},
+			expectErr: true,
+		},
+		{
+			name: "invalid validator address",
+			req: &disttypes.QueryDelegatorStartingInfoRequest{
+				DelegatorAddress: f.addr.String(),
+				ValidatorAddress: "invalid",
+			},
+			expectErr: true,
+		},
+		{
+			name: "non-existent validator",
+			req: &disttypes.QueryDelegatorStartingInfoRequest{
+				DelegatorAddress: f.addr.String(),
+				ValidatorAddress: sdk.ValAddress([]byte("nonexistent")).String(),
+			},
+			expectErr:   true,
+			errContains: "validator does not exist",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := f.querier.DelegatorStartingInfo(f.ctx, tc.req)
+			if tc.expectErr {
+				require.Error(t, err)
+				if tc.errContains != "" {
+					require.Contains(t, err.Error(), tc.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				require.Equal(t, tc.expectedPeriod, resp.StartingInfo.PreviousPeriod)
+				require.Equal(t, tc.expectedHeight, resp.StartingInfo.Height)
+				require.False(t, resp.StartingInfo.Stake.IsNegative())
 			}
 		})
 	}

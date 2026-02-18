@@ -6,23 +6,22 @@ import (
 	"testing"
 	"time"
 
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coretesting "cosmossdk.io/core/testing"
 	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
-	"cosmossdk.io/x/staking"
-	v5 "cosmossdk.io/x/staking/migrations/v5"
-	stakingtypes "cosmossdk.io/x/staking/types"
 
 	"github.com/cosmos/cosmos-sdk/codec"
-	codectestutil "github.com/cosmos/cosmos-sdk/codec/testutil"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
+	"github.com/cosmos/cosmos-sdk/x/staking"
+	v2 "github.com/cosmos/cosmos-sdk/x/staking/migrations/v2"
+	v5 "github.com/cosmos/cosmos-sdk/x/staking/migrations/v5"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 func TestHistoricalKeysMigration(t *testing.T) {
@@ -30,7 +29,6 @@ func TestHistoricalKeysMigration(t *testing.T) {
 	tKey := storetypes.NewTransientStoreKey("transient_test")
 	ctx := testutil.DefaultContext(storeKey, tKey)
 	store := ctx.KVStore(storeKey)
-	logger := coretesting.NewNopLogger()
 
 	type testCase struct {
 		oldKey, newKey []byte
@@ -45,16 +43,16 @@ func TestHistoricalKeysMigration(t *testing.T) {
 	// random cases
 	seed := time.Now().UnixNano()
 	r := rand.New(rand.NewSource(seed))
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		height := r.Intn(math.MaxInt32-2) + 2
 
 		testCases[int64(height)] = testCase{}
 	}
 
-	cdc := moduletestutil.MakeTestEncodingConfig(codectestutil.CodecOptions{}).Codec
+	cdc := moduletestutil.MakeTestEncodingConfig().Codec
 	for height := range testCases {
 		testCases[height] = testCase{
-			oldKey:         v5.GetLegacyHistoricalInfoKey(height),
+			oldKey:         v2.GetHistoricalInfoKey(height),
 			newKey:         v5.GetHistoricalInfoKey(height),
 			historicalInfo: cdc.MustMarshal(createHistoricalInfo(height, "testChainID")),
 		}
@@ -66,7 +64,7 @@ func TestHistoricalKeysMigration(t *testing.T) {
 	}
 
 	// migrate store to new key format
-	require.NoErrorf(t, v5.MigrateStore(ctx, store, cdc, logger), "v5.MigrateStore failed, seed: %d", seed)
+	require.NoErrorf(t, v5.MigrateStore(ctx, store, cdc), "v5.MigrateStore failed, seed: %d", seed)
 
 	// check results
 	for _, tc := range testCases {
@@ -81,26 +79,19 @@ func createHistoricalInfo(height int64, chainID string) *stakingtypes.Historical
 }
 
 func TestDelegationsByValidatorMigrations(t *testing.T) {
-	codecOpts := codectestutil.CodecOptions{}
-	cdc := moduletestutil.MakeTestEncodingConfig(codecOpts, staking.AppModule{}).Codec
+	cdc := moduletestutil.MakeTestEncodingConfig(staking.AppModuleBasic{}).Codec
 	storeKey := storetypes.NewKVStoreKey(v5.ModuleName)
 	tKey := storetypes.NewTransientStoreKey("transient_test")
 	ctx := testutil.DefaultContext(storeKey, tKey)
 	store := ctx.KVStore(storeKey)
-	logger := coretesting.NewNopLogger()
 
 	accAddrs := sims.CreateIncrementalAccounts(11)
 	valAddrs := sims.ConvertAddrsToValAddrs(accAddrs[0:1])
 	var addedDels []stakingtypes.Delegation
 
-	valAddr, err := codecOpts.GetValidatorCodec().BytesToString(valAddrs[0])
-	assert.NoError(t, err)
-
 	for i := 1; i < 11; i++ {
-		accAddr, err := codecOpts.GetAddressCodec().BytesToString(accAddrs[i])
-		assert.NoError(t, err)
-		del1 := stakingtypes.NewDelegation(accAddr, valAddr, sdkmath.LegacyNewDec(100))
-		store.Set(v5.GetDelegationKey(accAddrs[i], valAddrs[0]), stakingtypes.MustMarshalDelegation(cdc, del1))
+		del1 := stakingtypes.NewDelegation(accAddrs[i].String(), valAddrs[0].String(), sdkmath.LegacyNewDec(100))
+		store.Set(stakingtypes.GetDelegationKey(accAddrs[i], valAddrs[0]), stakingtypes.MustMarshalDelegation(cdc, del1))
 		addedDels = append(addedDels, del1)
 	}
 
@@ -108,7 +99,7 @@ func TestDelegationsByValidatorMigrations(t *testing.T) {
 	dels := getValDelegations(ctx, cdc, storeKey, valAddrs[0])
 	assert.Len(t, dels, 0)
 
-	err = v5.MigrateStore(ctx, store, cdc, logger)
+	err := v5.MigrateStore(ctx, store, cdc)
 	assert.NoError(t, err)
 
 	// after migration the state of delegations by val index should not be empty
@@ -124,12 +115,12 @@ func getValDelegations(ctx sdk.Context, cdc codec.Codec, storeKey storetypes.Sto
 	iterator := storetypes.KVStorePrefixIterator(store, v5.GetDelegationsByValPrefixKey(valAddr))
 	for ; iterator.Valid(); iterator.Next() {
 		var delegation stakingtypes.Delegation
-		valAddr, delAddr, err := v5.ParseDelegationsByValKey(iterator.Key())
+		valAddr, delAddr, err := stakingtypes.ParseDelegationsByValKey(iterator.Key())
 		if err != nil {
 			panic(err)
 		}
 
-		bz := store.Get(v5.GetDelegationKey(delAddr, valAddr))
+		bz := store.Get(stakingtypes.GetDelegationKey(delAddr, valAddr))
 
 		cdc.MustUnmarshal(bz, &delegation)
 

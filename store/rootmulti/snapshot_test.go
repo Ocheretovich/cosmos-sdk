@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"cosmossdk.io/store/iavl"
 	"cosmossdk.io/store/metrics"
 	"cosmossdk.io/store/rootmulti"
@@ -141,7 +141,6 @@ func TestMultistoreSnapshot_Checksum(t *testing.T) {
 		}},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(fmt.Sprintf("Format %v", tc.format), func(t *testing.T) {
 			ch := make(chan io.ReadCloser)
 			go func() {
@@ -176,7 +175,6 @@ func TestMultistoreSnapshot_Errors(t *testing.T) {
 		"unknown height": {9, nil},
 	}
 	for name, tc := range testcases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			err := store.Snapshot(tc.height, nil)
 			require.Error(t, err)

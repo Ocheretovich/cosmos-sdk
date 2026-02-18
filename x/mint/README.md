@@ -4,21 +4,14 @@ sidebar_position: 1
 
 # `x/mint`
 
+The `x/mint` module handles the regular minting of new tokens in a configurable manner.
+
 ## Contents
 
-* [Concepts](#concepts)
-    * [The Minting Mechanism](#the-minting-mechanism)
-    * [Provisions](#provisions)
-        * [Relation to Inflation](#relation-to-inflation)
-        * [Usage per Block](#usage-per-block)
-        * [Example](#example)
 * [State](#state)
     * [Minter](#minter)
     * [Params](#params)
-* [Epoch minting](#epoch-minting)
-    * [MintFn](#mintfn)
-* [Block based minting](#block-based-minting)
-    * [Default configuration](#default-configuration)
+* [Begin-Block](#begin-block)
     * [NextInflationRate](#nextinflationrate)
     * [NextAnnualProvisions](#nextannualprovisions)
     * [BlockProvision](#blockprovision)
@@ -34,7 +27,7 @@ sidebar_position: 1
 
 ### The Minting Mechanism
 
-The minting mechanism was designed to:
+The default minting mechanism was designed to:
 
 * allow for a flexible inflation rate determined by market demand targeting a particular bonded-stake ratio
 * effect a balance between market liquidity and staked supply
@@ -55,61 +48,92 @@ It can be broken down in the following way:
 * If the actual percentage of bonded tokens is above the goal %-bonded the inflation rate will
    decrease until a minimum value is reached
 
-### Provisions
+### Custom Minters
 
-Provisions are the number of tokens generated and distributed in each block. They are directly related to the inflation rate and the current total supply of tokens. The amount of provisions generated per block is calculated based on the annual provisions, which are determined by the inflation rate and the total supply of tokens.
+As of Cosmos SDK v0.53.0, developers can set a custom `MintFn` for the module for specialized token minting logic.
 
-#### Relation to Inflation
+The function signature that a `MintFn` must implement is as follows:
 
-The inflation rate determines the percentage of the total supply of tokens that will be added as provisions over a year. These annual provisions are divided by the number of blocks in a year to obtain the provisions per block.
-
-#### Usage per Block
-
-Each block uses a fraction of the annual provisions, calculated as: 
-
-```plaintext
-Provisions per block = Annual provisions / Number of blocks per year
+```go
+// MintFn defines the function that needs to be implemented in order to customize the minting process.
+type MintFn func(ctx sdk.Context, k *Keeper) error
 ```
 
-These provisions are distributed to validators and delegators as rewards for their participation in the network. 
+This can be passed to the `Keeper` upon creation with an additional `Option`:
 
+```go
+app.MintKeeper = mintkeeper.NewKeeper(
+		appCodec,
+		runtime.NewKVStoreService(keys[minttypes.StoreKey]),
+		app.StakingKeeper,
+		app.AccountKeeper,
+		app.BankKeeper,
+		authtypes.FeeCollectorName,
+		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+		// mintkeeper.WithMintFn(CUSTOM_MINT_FN), // custom mintFn can be added here
+	)
+```
 
-#### Example
+#### Custom Minter DI Example
 
-For example, if the total supply of tokens is 1,000,000 and the inflation rate is 10%, the annual provisions would be:
+Below is a simple approach to creating a custom mint function with extra dependencies in DI configurations.
+For this basic example, we will make the minter simply double the supply of `foo` coin.
 
-Annual provisions = 1,000,000 * 0.10 = 100,000 tokens
+First, we will define a function that takes our required dependencies, and returns a `MintFn`.
 
-If there are 3,153,600 blocks per year (one block every 10 seconds), the provisions per block would be:
-Provisions per block = 100,000 / 3,153,600 ≈ 0.0317 tokens per block.
+```go
+// MyCustomMintFunction is a custom mint function that doubles the supply of `foo` coin.
+func MyCustomMintFunction(bank bankkeeper.BaseKeeper) mintkeeper.MintFn {
+	return func(ctx sdk.Context, k *mintkeeper.Keeper) error {
+		supply := bank.GetSupply(ctx, "foo")
+		err := k.MintCoins(ctx, sdk.NewCoins(supply.Add(supply)))
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+}
+```
 
-These provisions are then distributed to validators and delegators as rewards.
+Then, pass the function defined above into the `depinject.Supply` function with the required dependencies.
 
-```mermaid
-flowchart TD
-    A[Start] --> B[Get Total Supply]
-    B --> C[Get Inflation Rate]
-    C --> D[Calculate Annual Provisions]
-    D --> E[Calculate Provisions per Block]
-    E --> F[Distribute Provisions to Validators and Delegators]
-
-    subgraph Calculation
-        D --> |Annual Provisions = Total Supply * Inflation Rate| D
-        E --> |Provisions per Block = Annual Provisions / Number of Blocks per Year| E
-    end
+```go
+// NewSimApp returns a reference to an initialized SimApp.
+func NewSimApp(
+    logger log.Logger,
+    db dbm.DB,
+    traceStore io.Writer,
+    loadLatest bool,
+    appOpts servertypes.AppOptions,
+    baseAppOptions ...func(*baseapp.BaseApp),
+) *SimApp {
+    var (
+        app        = &SimApp{}
+        appBuilder *runtime.AppBuilder
+        appConfig = depinject.Configs(
+            AppConfig,
+            depinject.Supply(
+                appOpts,
+                logger,
+                // our custom mint function with the necessary dependency passed in.
+                MyCustomMintFunction(app.BankKeeper),
+            ),
+        )
+	)
+	// ...
+}
 ```
 
 ## State
 
 ### Minter
 
-The minter is a space for holding current inflation information and any other data
-related to minting (in the `data` field)
+The minter is a space for holding current inflation information.
 
 * Minter: `0x00 -> ProtocolBuffer(minter)`
 
 ```protobuf reference
-https://github.com/cosmos/cosmos-sdk/blob/release/v0.52.x/x/mint/proto/cosmos/mint/v1beta1/mint.proto#L11-L29
+https://github.com/cosmos/cosmos-sdk/blob/v0.47.0-rc1/proto/cosmos/mint/v1beta1/mint.proto#L10-L24
 ```
 
 ### Params
@@ -122,46 +146,14 @@ A value of `0` indicates an unlimited supply.
 * Params: `mint/params -> legacy_amino(params)`
 
 ```protobuf reference
-https://github.com/cosmos/cosmos-sdk/blob/release/v0.52.x/x/mint/proto/cosmos/mint/v1beta1/mint.proto#L31-L73
+https://github.com/cosmos/cosmos-sdk/blob/7068d0da52d954430054768b2c56aff44666933b/x/mint/proto/cosmos/mint/v1beta1/mint.proto#L26-L68
 ```
 
-## Epoch minting
+## Begin-Block
 
-In the latest release of x/mint, the minting logic has been refactored to allow for more flexibility in the minting process. The `InflationCalculationFn` has been deprecated in favor of `MintFn`. The `MintFn` function is passed to the `NewAppModule` function and is used to mint tokens on the configured epoch beginning. This change allows users to define their own minting logic and removes any assumptions on how tokens are minted.
+Minting parameters are recalculated and inflation paid at the beginning of each block.
 
-```mermaid
-flowchart LR
-    A[BeforeEpochStart] --> B[MintFn]
-
-    subgraph B["MintFn (user defined)"]
-        direction LR
-        C[Get x/staking info] --> D[Calculate Inflation]
-        D --> E[Mint Tokens]
-    end
-```
-
-### MintFn
-
-The `MintFn` function is called at the beginning of each epoch and is responsible for minting tokens. The function signature is as follows:
-
-```go
-type MintFn func(ctx context.Context, env appmodule.Environment, minter *Minter, epochId string, epochNumber int64) error
-```
-
-How this function mints tokens is defined by the app developers, meaning they can query state and perform any calculations they deem necessary. [This implementation](https://github.com/cosmos/cosmos-sdk/blob/ace7bca105a8d5363782cfd19c6f169b286cd3b2/simapp/mint_fn.go#L25) in SimApp contains examples of how to use `QueryRouterService` and the Minter's `data`.
-
-:::warning
-Note that BeginBlock will keep calling the MintFn for every block, so it is important to ensure that MintFn returns early if the epoch ID does not match the expected one.
-:::
-
-
-## Block based minting
-
-In addition to minting based on epoch, minting based on block is also possible. This is achieved through calling the `MintFn` in `BeginBlock` with an epochID and epochNumber of `"block"` and `-1`, respectively.
-
-### Default configuration
-
-If no `MintFn` is passed to the `NewAppModule` function, the minting logic defaults to block-based minting, corresponding to `mintKeeper.DefaultMintFn(types.DefaultInflationCalculationFn)`. 
+The minting logic in the `BeginBlocker` function provides an optional feature for controlling token minting based on the maximum allowable supply (MaxSupply). This feature allows users to adjust the minting process according to their specific requirements and use cases. However, it's important to note that the MaxSupply parameter is independent of the minting process and assumes that any adjustments to the total supply, including burning tokens, are handled by external modules.
 
 ### Inflation rate calculation
 
@@ -172,7 +164,7 @@ inflation calculation logic is needed, this can be achieved by defining and
 passing a function that matches `InflationCalculationFn`'s signature.
 
 ```go
-type InflationCalculationFn func(ctx sdk.Context, minter Minter, params Params, bondedRatio math.LegacyDec) math.LegacyDec
+type InflationCalculationFn func(ctx context.Context, minter Minter, params Params, bondedRatio math.LegacyDec) math.LegacyDec
 ```
 
 #### NextInflationRate
@@ -180,7 +172,8 @@ type InflationCalculationFn func(ctx sdk.Context, minter Minter, params Params, 
 The target annual inflation rate is recalculated each block.
 The inflation is also subject to a rate change (positive or negative)
 depending on the distance from the desired ratio (67%). The maximum rate change
-possible is defined to be 5% per year, however, the annual inflation is capped between 0% and 5%.
+possible is defined to be 13% per year, however, the annual inflation is capped
+as between 7% and 20%.
 
 ```go
 NextInflationRate(params Params, bondedRatio math.LegacyDec) (inflation math.LegacyDec) {
@@ -224,7 +217,9 @@ BlockProvision(params Params) sdk.Coin {
 ## Parameters
 
 The minting module contains the following parameters:
-Note: `0` indicates unlimited supply for MaxSupply param
+Note: `0` indicates unlimited supply for the `MaxSupply` parameter.
+
+For legacy Amino JSON compatibility, `max_supply` is encoded even when it is `"0"`.
 
 | Key                 | Type             | Example                |
 |---------------------|------------------|------------------------|

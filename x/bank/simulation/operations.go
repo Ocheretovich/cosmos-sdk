@@ -3,29 +3,30 @@ package simulation
 import (
 	"math/rand"
 
-	"cosmossdk.io/x/bank/keeper"
-	"cosmossdk.io/x/bank/types"
-
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	"github.com/cosmos/cosmos-sdk/x/bank/keeper"
+	"github.com/cosmos/cosmos-sdk/x/bank/types"
+	disttypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
 )
 
 // Simulation operation weights constants
+// will be removed in the future
 const (
 	OpWeightMsgSend           = "op_weight_msg_send"
 	OpWeightMsgMultiSend      = "op_weight_msg_multisend"
 	DefaultWeightMsgSend      = 100 // from simappparams.DefaultWeightMsgSend
 	DefaultWeightMsgMultiSend = 10  // from simappparams.DefaultWeightMsgMultiSend
-
-	distributionModuleName = "distribution"
 )
 
 // WeightedOperations returns all the operations from the module with their respective weights
+// migrate to the msg factories instead, this method will be removed in the future
 func WeightedOperations(
 	appParams simtypes.AppParams,
 	cdc codec.JSONCodec,
@@ -56,13 +57,14 @@ func WeightedOperations(
 
 // SimulateMsgSend tests and runs a single msg send where both
 // accounts already exist.
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgSend(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
 	bk keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context,
 		accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgSend{})
@@ -77,22 +79,15 @@ func SimulateMsgSend(
 		if err := bk.IsSendEnabledCoins(ctx, coins...); err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, nil
 		}
+
 		if skip {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "skip all transfers"), nil, nil
 		}
 
-		fromstr, err := ak.AddressCodec().BytesToString(from.Address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, nil
-		}
-		tostr, err := ak.AddressCodec().BytesToString(to.Address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, nil
-		}
+		msg := types.NewMsgSend(from.Address, to.Address, coins)
 
-		msg := types.NewMsgSend(fromstr, tostr, coins)
-
-		if err := sendMsgSend(r, app, txGen, bk, ak, msg, ctx, chainID, []cryptotypes.PrivKey{from.PrivKey}); err != nil {
+		err := sendMsgSend(r, app, txGen, bk, ak, msg, ctx, chainID, []cryptotypes.PrivKey{from.PrivKey})
+		if err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "invalid transfers"), nil, err
 		}
 
@@ -102,19 +97,20 @@ func SimulateMsgSend(
 
 // SimulateMsgSendToModuleAccount tests and runs a single msg send where both
 // accounts already exist.
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgSendToModuleAccount(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
 	bk keeper.Keeper,
-	moduleAccount int,
+	moduleAccCount int,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context,
 		accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgSend{})
 		from := accs[0]
-		to := getModuleAccounts(ak, ctx, moduleAccount)[0]
+		to := getModuleAccounts(ak, ctx, moduleAccCount)[0]
 
 		spendable := bk.SpendableCoins(ctx, from.Address)
 		coins := simtypes.RandSubsetCoins(r, spendable)
@@ -122,30 +118,26 @@ func SimulateMsgSendToModuleAccount(
 		if len(coins) == 0 {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "empty coins slice"), nil, nil
 		}
+
 		// Check send_enabled status of each coin denom
 		if err := bk.IsSendEnabledCoins(ctx, coins...); err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, nil
 		}
-		fromstr, err := ak.AddressCodec().BytesToString(from.Address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, nil
-		}
-		tostr, err := ak.AddressCodec().BytesToString(to.Address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, nil
-		}
-		msg := types.NewMsgSend(fromstr, tostr, coins)
 
-		if err := sendMsgSend(r, app, txGen, bk, ak, msg, ctx, chainID, []cryptotypes.PrivKey{from.PrivKey}); err != nil {
+		msg := types.NewMsgSend(from.Address, to.Address, coins)
+
+		err := sendMsgSend(r, app, txGen, bk, ak, msg, ctx, chainID, []cryptotypes.PrivKey{from.PrivKey})
+		if err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "invalid transfers"), nil, err
 		}
+
 		return simtypes.NewOperationMsg(msg, true, ""), nil, nil
 	}
 }
 
 // sendMsgSend sends a transaction with a MsgSend from a provided random account.
 func sendMsgSend(
-	r *rand.Rand, app simtypes.AppEntrypoint,
+	r *rand.Rand, app *baseapp.BaseApp,
 	txGen client.TxConfig,
 	bk keeper.Keeper, ak types.AccountKeeper,
 	msg *types.MsgSend, ctx sdk.Context, chainID string, privkeys []cryptotypes.PrivKey,
@@ -155,7 +147,7 @@ func sendMsgSend(
 		err  error
 	)
 
-	from, err := ak.AddressCodec().StringToBytes(msg.FromAddress)
+	from, err := sdk.AccAddressFromBech32(msg.FromAddress)
 	if err != nil {
 		return err
 	}
@@ -165,7 +157,7 @@ func sendMsgSend(
 
 	coins, hasNeg := spendable.SafeSub(msg.Amount...)
 	if !hasNeg {
-		fees, err = simtypes.RandomFees(r, coins)
+		fees, err = simtypes.RandomFees(r, ctx, coins)
 		if err != nil {
 			return err
 		}
@@ -185,7 +177,7 @@ func sendMsgSend(
 		return err
 	}
 
-	_, _, err = app.SimDeliver(txGen.TxEncoder(), tx)
+	_, _, err = app.SimTxFinalizeBlock(txGen.TxEncoder(), tx)
 	if err != nil {
 		return err
 	}
@@ -195,9 +187,10 @@ func sendMsgSend(
 
 // SimulateMsgMultiSend tests and runs a single msg multisend, with randomized, capped number of inputs/outputs.
 // all accounts in msg fields exist in state
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgMultiSend(txGen client.TxConfig, ak types.AccountKeeper, bk keeper.Keeper) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context,
 		accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgMultiSend{})
@@ -217,13 +210,8 @@ func SimulateMsgMultiSend(txGen client.TxConfig, ak types.AccountKeeper, bk keep
 			// generate random input fields, ignore to address
 			from, _, coins, skip := randomSendFields(r, ctx, accs, bk, ak)
 
-			fromAddr, err := ak.AddressCodec().BytesToString(from.Address)
-			if err != nil {
-				return simtypes.NoOpMsg(types.ModuleName, msgType, "could not retrieve address"), nil, err
-			}
-
 			// make sure account is fresh and not used in previous input
-			for usedAddrs[fromAddr] {
+			for usedAddrs[from.Address.String()] {
 				from, _, coins, skip = randomSendFields(r, ctx, accs, bk, ak)
 			}
 
@@ -232,13 +220,13 @@ func SimulateMsgMultiSend(txGen client.TxConfig, ak types.AccountKeeper, bk keep
 			}
 
 			// set input address in used address map
-			usedAddrs[fromAddr] = true
+			usedAddrs[from.Address.String()] = true
 
 			// set signer privkey
 			privs[i] = from.PrivKey
 
 			// set next input and accumulate total sent coins
-			inputs[i] = types.NewInput(fromAddr, coins)
+			inputs[i] = types.NewInput(from.Address, coins)
 			totalSentCoins = totalSentCoins.Add(coins...)
 		}
 
@@ -248,11 +236,7 @@ func SimulateMsgMultiSend(txGen client.TxConfig, ak types.AccountKeeper, bk keep
 		}
 
 		for o := range outputs {
-			out, _ := simtypes.RandomAcc(r, accs)
-			outAddr, err := ak.AddressCodec().BytesToString(out.Address)
-			if err != nil {
-				return simtypes.NoOpMsg(types.ModuleName, msgType, "could not retrieve output address"), nil, err
-			}
+			outAddr, _ := simtypes.RandomAcc(r, accs)
 
 			var outCoins sdk.Coins
 			// split total sent coins into random subsets for output
@@ -265,7 +249,7 @@ func SimulateMsgMultiSend(txGen client.TxConfig, ak types.AccountKeeper, bk keep
 				totalSentCoins = totalSentCoins.Sub(outCoins...)
 			}
 
-			outputs[o] = types.NewOutput(outAddr, outCoins)
+			outputs[o] = types.NewOutput(outAddr.Address, outCoins)
 		}
 
 		// remove any output that has no coins
@@ -294,44 +278,36 @@ func SimulateMsgMultiSend(txGen client.TxConfig, ak types.AccountKeeper, bk keep
 }
 
 // SimulateMsgMultiSendToModuleAccount sends coins to Module Accounts
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgMultiSendToModuleAccount(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
 	bk keeper.Keeper,
-	moduleAccount int,
+	moduleAccCount int,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context,
 		accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgMultiSend{})
 		inputs := make([]types.Input, 2)
-		outputs := make([]types.Output, moduleAccount)
+		outputs := make([]types.Output, moduleAccCount)
 		// collect signer privKeys
 		privs := make([]cryptotypes.PrivKey, len(inputs))
 		var totalSentCoins sdk.Coins
 		for i := range inputs {
 			sender := accs[i]
 			privs[i] = sender.PrivKey
-			senderAddr, err := ak.AddressCodec().BytesToString(sender.Address)
-			if err != nil {
-				return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, err
-			}
 			spendable := bk.SpendableCoins(ctx, sender.Address)
 			coins := simtypes.RandSubsetCoins(r, spendable)
-			inputs[i] = types.NewInput(senderAddr, coins)
+			inputs[i] = types.NewInput(sender.Address, coins)
 			totalSentCoins = totalSentCoins.Add(coins...)
 		}
 		if err := bk.IsSendEnabledCoins(ctx, totalSentCoins...); err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, err.Error()), nil, nil
 		}
-		moduleAccounts := getModuleAccounts(ak, ctx, moduleAccount)
+		moduleAccounts := getModuleAccounts(ak, ctx, moduleAccCount)
 		for i := range outputs {
-			outAddr, err := ak.AddressCodec().BytesToString(moduleAccounts[i].Address)
-			if err != nil {
-				return simtypes.NoOpMsg(types.ModuleName, msgType, "could not retrieve output address"), nil, err
-			}
-
 			var outCoins sdk.Coins
 			// split total sent coins into random subsets for output
 			if i == len(outputs)-1 {
@@ -342,7 +318,7 @@ func SimulateMsgMultiSendToModuleAccount(
 				outCoins = simtypes.RandSubsetCoins(r, totalSentCoins)
 				totalSentCoins = totalSentCoins.Sub(outCoins...)
 			}
-			outputs[i] = types.NewOutput(outAddr, outCoins)
+			outputs[i] = types.NewOutput(moduleAccounts[i].Address, outCoins)
 		}
 		// remove any output that has no coins
 		for i := 0; i < len(outputs); {
@@ -369,14 +345,14 @@ func SimulateMsgMultiSendToModuleAccount(
 // sendMsgMultiSend sends a transaction with a MsgMultiSend from a provided random
 // account.
 func sendMsgMultiSend(
-	r *rand.Rand, app simtypes.AppEntrypoint,
+	r *rand.Rand, app *baseapp.BaseApp,
 	txGen client.TxConfig,
 	bk keeper.Keeper, ak types.AccountKeeper,
 	msg *types.MsgMultiSend, ctx sdk.Context, chainID string, privkeys []cryptotypes.PrivKey,
 ) error {
 	accountNumbers := make([]uint64, len(msg.Inputs))
 	sequenceNumbers := make([]uint64, len(msg.Inputs))
-	for i := 0; i < len(msg.Inputs); i++ {
+	for i := range msg.Inputs {
 		addr, err := ak.AddressCodec().StringToBytes(msg.Inputs[i].Address)
 		if err != nil {
 			panic(err)
@@ -400,7 +376,7 @@ func sendMsgMultiSend(
 	spendable := bk.SpendableCoins(ctx, feePayer.GetAddress())
 	coins, hasNeg := spendable.SafeSub(msg.Inputs[0].Coins...)
 	if !hasNeg {
-		fees, err = simtypes.RandomFees(r, coins)
+		fees, err = simtypes.RandomFees(r, ctx, coins)
 		if err != nil {
 			return err
 		}
@@ -419,7 +395,7 @@ func sendMsgMultiSend(
 	if err != nil {
 		return err
 	}
-	_, _, err = app.SimDeliver(txGen.TxEncoder(), tx)
+	_, _, err = app.SimTxFinalizeBlock(txGen.TxEncoder(), tx)
 	if err != nil {
 		return err
 	}
@@ -454,11 +430,11 @@ func randomSendFields(
 	return from, to, sendCoins, false
 }
 
-func getModuleAccounts(ak types.AccountKeeper, ctx sdk.Context, moduleAccount int) []simtypes.Account {
-	moduleAccounts := make([]simtypes.Account, moduleAccount)
+func getModuleAccounts(ak types.AccountKeeper, ctx sdk.Context, moduleAccCount int) []simtypes.Account {
+	moduleAccounts := make([]simtypes.Account, moduleAccCount)
 
-	for i := 0; i < moduleAccount; i++ {
-		acc := ak.GetModuleAccount(ctx, distributionModuleName)
+	for i := range moduleAccCount {
+		acc := ak.GetModuleAccount(ctx, disttypes.ModuleName)
 		mAcc := simtypes.Account{
 			Address: acc.GetAddress(),
 			PrivKey: nil,

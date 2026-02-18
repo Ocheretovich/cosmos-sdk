@@ -4,7 +4,9 @@ import (
 	"context"
 
 	"cosmossdk.io/errors"
-	"cosmossdk.io/x/mint/types"
+
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	"github.com/cosmos/cosmos-sdk/x/mint/types"
 )
 
 var _ types.MsgServer = msgServer{}
@@ -24,7 +26,7 @@ func NewMsgServerImpl(k Keeper) types.MsgServer {
 // UpdateParams updates the params.
 func (ms msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
 	if ms.authority != msg.Authority {
-		return nil, errors.Wrapf(types.ErrInvalidSigner, "invalid authority; expected %s, got %s", ms.authority, msg.Authority)
+		return nil, errors.Wrapf(govtypes.ErrInvalidSigner, "invalid authority; expected %s, got %s", ms.authority, msg.Authority)
 	}
 
 	if err := msg.Params.Validate(); err != nil {

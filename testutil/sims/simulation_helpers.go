@@ -9,7 +9,7 @@ import (
 
 	dbm "github.com/cosmos/cosmos-db"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/client"
@@ -18,11 +18,12 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/kv"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
 )
 
-// SetupSimulation creates the config, db (levelDB), temporary directory and logger for the simulation tests.
-// If `skip` is false it skips the current test. `skip` should be set using the `FlagEnabledValue` flag.
+// SetupSimulation creates the DB (using config.DBBackend), temporary directory and logger for simulation tests.
+// If `skip` is false it returns `true` for the "skip" return value without creating any resources.
 // Returns error on an invalid db instantiation or temp dir creation.
 func SetupSimulation(config simtypes.Config, dirPrefix, dbName string, verbose, skip bool) (dbm.DB, string, log.Logger, bool, error) {
 	if !skip {
@@ -51,15 +52,20 @@ func SetupSimulation(config simtypes.Config, dirPrefix, dbName string, verbose, 
 
 // SimulationOperations retrieves the simulation params from the provided file path
 // and returns all the modules weighted operations
-func SimulationOperations(app runtime.AppSimI, cdc codec.Codec, config simtypes.Config, txConfig client.TxConfig) []simtypes.WeightedOperation {
-	signingCtx := cdc.InterfaceRegistry().SigningContext()
+//
+// Deprecated: use BuildSimulationOperations with TxConfig
+func SimulationOperations(app runtime.AppI, cdc codec.JSONCodec, config simtypes.Config) []simtypes.WeightedOperation {
+	return BuildSimulationOperations(app, cdc, config, moduletestutil.MakeTestTxConfig())
+}
+
+// BuildSimulationOperations retrieves the simulation params from the provided file path
+// and returns all the modules weighted operations
+func BuildSimulationOperations(app runtime.AppI, cdc codec.JSONCodec, config simtypes.Config, txConfig client.TxConfig) []simtypes.WeightedOperation {
 	simState := module.SimulationState{
-		AppParams:      make(simtypes.AppParams),
-		Cdc:            cdc,
-		AddressCodec:   signingCtx.AddressCodec(),
-		ValidatorCodec: signingCtx.ValidatorAddressCodec(),
-		TxConfig:       txConfig,
-		BondDenom:      sdk.DefaultBondDenom,
+		AppParams: make(simtypes.AppParams),
+		Cdc:       cdc,
+		TxConfig:  txConfig,
+		BondDenom: sdk.DefaultBondDenom,
 	}
 
 	if config.ParamsFile != "" {
@@ -81,7 +87,7 @@ func SimulationOperations(app runtime.AppSimI, cdc codec.Codec, config simtypes.
 
 // CheckExportSimulation exports the app state and simulation parameters to JSON
 // if the export paths are defined.
-func CheckExportSimulation(app runtime.AppSimI, config simtypes.Config, params simtypes.Params) error {
+func CheckExportSimulation(app runtime.AppI, config simtypes.Config, params simtypes.Params) error {
 	if config.ExportStatePath != "" {
 		fmt.Println("exporting app state...")
 		exported, err := app.ExportAppStateAndValidators(false, nil, nil)
@@ -118,7 +124,7 @@ func PrintStats(db dbm.DB) {
 // GetSimulationLog unmarshals the KVPair's Value to the corresponding type based on the
 // each's module store key and the prefix bytes of the KVPair's key.
 func GetSimulationLog(storeName string, sdr simtypes.StoreDecoderRegistry, kvAs, kvBs []kv.Pair) (log string) {
-	for i := 0; i < len(kvAs); i++ {
+	for i := range kvAs {
 		if len(kvAs[i].Value) == 0 && len(kvBs[i].Value) == 0 {
 			// skip if the value doesn't have any bytes
 			continue

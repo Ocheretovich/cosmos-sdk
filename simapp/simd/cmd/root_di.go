@@ -7,18 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	authv1 "cosmossdk.io/api/cosmos/auth/module/v1"
 	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
-	stakingv1 "cosmossdk.io/api/cosmos/staking/module/v1"
 	"cosmossdk.io/client/v2/autocli"
-	"cosmossdk.io/core/address"
-	"cosmossdk.io/core/legacy"
 	"cosmossdk.io/depinject"
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"cosmossdk.io/simapp"
-	"cosmossdk.io/x/auth/tx"
-	authtxconfig "cosmossdk.io/x/auth/tx/config"
-	"cosmossdk.io/x/auth/types"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/config"
@@ -27,25 +20,30 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/server"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	"github.com/cosmos/cosmos-sdk/x/auth/tx"
+	authtxconfig "github.com/cosmos/cosmos-sdk/x/auth/tx/config"
+	"github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
 // NewRootCmd creates a new root command for simd. It is called once in the main function.
 func NewRootCmd() *cobra.Command {
 	var (
-		autoCliOpts   autocli.AppOptions
-		moduleManager *module.Manager
-		clientCtx     client.Context
+		autoCliOpts        autocli.AppOptions
+		moduleBasicManager module.BasicManager
+		clientCtx          client.Context
 	)
 
 	if err := depinject.Inject(
-		depinject.Configs(simapp.AppConfig(),
-			depinject.Supply(log.NewNopLogger()),
+		depinject.Configs(simapp.AppConfig,
+			depinject.Supply(
+				log.NewNopLogger(),
+			),
 			depinject.Provide(
 				ProvideClientContext,
 			),
 		),
 		&autoCliOpts,
-		&moduleManager,
+		&moduleBasicManager,
 		&clientCtx,
 	); err != nil {
 		panic(err)
@@ -66,8 +64,7 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 
-			customClientTemplate, customClientConfig := initClientConfig()
-			clientCtx, err = config.CreateClientConfig(clientCtx, customClientTemplate, customClientConfig)
+			clientCtx, err = config.ReadFromClientConfig(clientCtx)
 			if err != nil {
 				return err
 			}
@@ -83,7 +80,7 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 
-	initRootCmd(rootCmd, moduleManager)
+	initRootCmd(rootCmd, clientCtx.TxConfig, moduleBasicManager)
 
 	nodeCmds := nodeservice.NewNodeCommands()
 	autoCliOpts.ModuleOptions = make(map[string]*autocliv1.ModuleOptions)
@@ -100,40 +97,18 @@ func ProvideClientContext(
 	appCodec codec.Codec,
 	interfaceRegistry codectypes.InterfaceRegistry,
 	txConfigOpts tx.ConfigOptions,
-	legacyAmino legacy.Amino,
-	addressCodec address.Codec,
-	validatorAddressCodec address.ValidatorAddressCodec,
-	consensusAddressCodec address.ConsensusAddressCodec,
-	authConfig *authv1.Module,
-	stakingConfig *stakingv1.Module,
+	legacyAmino *codec.LegacyAmino,
 ) client.Context {
-	var err error
-
-	amino, ok := legacyAmino.(*codec.LegacyAmino)
-	if !ok {
-		panic("ProvideClientContext requires a *codec.LegacyAmino instance")
-	}
-
 	clientCtx := client.Context{}.
 		WithCodec(appCodec).
 		WithInterfaceRegistry(interfaceRegistry).
-		WithLegacyAmino(amino).
+		WithLegacyAmino(legacyAmino).
 		WithInput(os.Stdin).
 		WithAccountRetriever(types.AccountRetriever{}).
-		WithAddressCodec(addressCodec).
-		WithValidatorAddressCodec(validatorAddressCodec).
-		WithConsensusAddressCodec(consensusAddressCodec).
 		WithHomeDir(simapp.DefaultNodeHome).
-		WithViper(""). // uses by default the binary name as prefix
-		WithAddressPrefix(authConfig.Bech32Prefix).
-		WithValidatorPrefix(stakingConfig.Bech32PrefixValidator)
+		WithViper("") // uses by default the binary name as prefix
 
-	// Read the config to overwrite the default values with the values from the config file
-	customClientTemplate, customClientConfig := initClientConfig()
-	clientCtx, err = config.CreateClientConfig(clientCtx, customClientTemplate, customClientConfig)
-	if err != nil {
-		panic(err)
-	}
+	clientCtx, _ = config.ReadFromClientConfig(clientCtx)
 
 	// textual is enabled by default, we need to re-create the tx config grpc instead of bank keeper.
 	txConfigOpts.TextualCoinMetadataQueryFn = authtxconfig.NewGRPCCoinMetadataQueryFn(clientCtx)

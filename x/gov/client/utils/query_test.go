@@ -10,14 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	sdkmath "cosmossdk.io/math"
-	"cosmossdk.io/x/gov"
-	"cosmossdk.io/x/gov/client/utils"
-	v1 "cosmossdk.io/x/gov/types/v1"
 
 	"github.com/cosmos/cosmos-sdk/client"
-	codectestutil "github.com/cosmos/cosmos-sdk/codec/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
+	"github.com/cosmos/cosmos-sdk/x/gov"
+	"github.com/cosmos/cosmos-sdk/x/gov/client/utils"
+	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 )
 
 type TxSearchMock struct {
@@ -55,8 +54,7 @@ func (mock TxSearchMock) Block(ctx context.Context, height *int64) (*coretypes.R
 }
 
 func TestGetPaginatedVotes(t *testing.T) {
-	cdcOpts := codectestutil.CodecOptions{}
-	encCfg := moduletestutil.MakeTestEncodingConfig(cdcOpts, gov.AppModule{})
+	encCfg := moduletestutil.MakeTestEncodingConfig(gov.AppModuleBasic{})
 
 	type testCase struct {
 		description string
@@ -66,20 +64,16 @@ func TestGetPaginatedVotes(t *testing.T) {
 	}
 	acc1 := make(sdk.AccAddress, 20)
 	acc1[0] = 1
-	acc1Str, err := cdcOpts.GetAddressCodec().BytesToString(acc1)
-	require.NoError(t, err)
 	acc2 := make(sdk.AccAddress, 20)
 	acc2[0] = 2
-	acc2Str, err := cdcOpts.GetAddressCodec().BytesToString(acc2)
-	require.NoError(t, err)
 	acc1Msgs := []sdk.Msg{
-		v1.NewMsgVote(acc1Str, 0, v1.OptionYes, ""),
-		v1.NewMsgVote(acc1Str, 0, v1.OptionYes, ""),
-		v1.NewMsgDeposit(acc1Str, 0, sdk.NewCoins(sdk.NewCoin("stake", sdkmath.NewInt(10)))), // should be ignored
+		v1.NewMsgVote(acc1, 0, v1.OptionYes, ""),
+		v1.NewMsgVote(acc1, 0, v1.OptionYes, ""),
+		v1.NewMsgDeposit(acc1, 0, sdk.NewCoins(sdk.NewCoin("stake", sdkmath.NewInt(10)))), // should be ignored
 	}
 	acc2Msgs := []sdk.Msg{
-		v1.NewMsgVote(acc2Str, 0, v1.OptionYes, ""),
-		v1.NewMsgVoteWeighted(acc2Str, 0, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
+		v1.NewMsgVote(acc2, 0, v1.OptionYes, ""),
+		v1.NewMsgVoteWeighted(acc2, 0, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
 	}
 	for _, tc := range []testCase{
 		{
@@ -91,8 +85,8 @@ func TestGetPaginatedVotes(t *testing.T) {
 				acc2Msgs[:1],
 			},
 			votes: []v1.Vote{
-				v1.NewVote(0, acc1Str, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
-				v1.NewVote(0, acc2Str, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
+				v1.NewVote(0, acc1, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
+				v1.NewVote(0, acc2, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
 			},
 		},
 		{
@@ -104,8 +98,8 @@ func TestGetPaginatedVotes(t *testing.T) {
 				acc2Msgs,
 			},
 			votes: []v1.Vote{
-				v1.NewVote(0, acc1Str, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
-				v1.NewVote(0, acc1Str, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
+				v1.NewVote(0, acc1, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
+				v1.NewVote(0, acc1, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
 			},
 		},
 		{
@@ -117,8 +111,8 @@ func TestGetPaginatedVotes(t *testing.T) {
 				acc2Msgs,
 			},
 			votes: []v1.Vote{
-				v1.NewVote(0, acc2Str, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
-				v1.NewVote(0, acc2Str, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
+				v1.NewVote(0, acc2, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
+				v1.NewVote(0, acc2, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
 			},
 		},
 		{
@@ -128,7 +122,7 @@ func TestGetPaginatedVotes(t *testing.T) {
 			msgs: [][]sdk.Msg{
 				acc1Msgs[:1],
 			},
-			votes: []v1.Vote{v1.NewVote(0, acc1Str, v1.NewNonSplitVoteOption(v1.OptionYes), "")},
+			votes: []v1.Vote{v1.NewVote(0, acc1, v1.NewNonSplitVoteOption(v1.OptionYes), "")},
 		},
 		{
 			description: "InvalidPage",
@@ -146,8 +140,6 @@ func TestGetPaginatedVotes(t *testing.T) {
 			},
 		},
 	} {
-		tc := tc
-
 		t.Run(tc.description, func(t *testing.T) {
 			marshaled := make([]cmttypes.Tx, len(tc.msgs))
 			cli := TxSearchMock{txs: marshaled, txConfig: encCfg.TxConfig}
@@ -166,7 +158,7 @@ func TestGetPaginatedVotes(t *testing.T) {
 				marshaled[i] = tx
 			}
 
-			params := utils.QueryProposalVotesParams{0, tc.page, tc.limit}
+			params := v1.NewQueryProposalVotesParams(0, tc.page, tc.limit)
 			votesData, err := utils.QueryVotesByTxQuery(clientCtx, params)
 			require.NoError(t, err)
 			votes := []v1.Vote{}

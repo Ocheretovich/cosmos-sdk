@@ -18,7 +18,7 @@ type AppBuilder struct {
 	app *App
 }
 
-// DefaultGenesis returns a default genesis from the registered modules.
+// DefaultGenesis returns a default genesis from the registered AppModuleBasic's.
 func (a *AppBuilder) DefaultGenesis() map[string]json.RawMessage {
 	return a.app.DefaultGenesis()
 }
@@ -29,9 +29,18 @@ func (a *AppBuilder) Build(db dbm.DB, traceStore io.Writer, baseAppOptions ...fu
 		baseAppOptions = append(baseAppOptions, option)
 	}
 
+	// set routers first in case they get modified by other options
+	baseAppOptions = append(
+		[]func(*baseapp.BaseApp){
+			func(bApp *baseapp.BaseApp) {
+				bApp.SetMsgServiceRouter(a.app.msgServiceRouter)
+				bApp.SetGRPCQueryRouter(a.app.grpcQueryRouter)
+			},
+		},
+		baseAppOptions...,
+	)
+
 	bApp := baseapp.NewBaseApp(a.app.config.AppName, a.app.logger, db, nil, baseAppOptions...)
-	bApp.SetMsgServiceRouter(a.app.msgServiceRouter)
-	bApp.SetGRPCQueryRouter(a.app.grpcQueryRouter)
 	bApp.SetCommitMultiStoreTracer(traceStore)
 	bApp.SetVersion(version.Version)
 	bApp.SetInterfaceRegistry(a.app.interfaceRegistry)

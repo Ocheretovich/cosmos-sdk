@@ -9,11 +9,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"cosmossdk.io/x/auth/types"
-
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
+	"github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
 var _ types.QueryServer = queryServer{}
@@ -40,12 +39,7 @@ func (s queryServer) AccountAddressByID(ctx context.Context, req *types.QueryAcc
 		return nil, status.Errorf(codes.NotFound, "account address not found with account number %d", accID)
 	}
 
-	addr, err := s.k.addressCodec.BytesToString(address)
-	if err != nil {
-		return nil, err
-	}
-
-	return &types.QueryAccountAddressByIDResponse{AccountAddress: addr}, nil
+	return &types.QueryAccountAddressByIDResponse{AccountAddress: address.String()}, nil
 }
 
 func (s queryServer) Accounts(ctx context.Context, req *types.QueryAccountsRequest) (*types.QueryAccountsResponse, error) {
@@ -86,27 +80,30 @@ func (s queryServer) Account(ctx context.Context, req *types.QueryAccountRequest
 
 	any, err := codectypes.NewAnyWithValue(account)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
 
 	return &types.QueryAccountResponse{Account: any}, nil
 }
 
 // Params returns parameters of auth module
-func (s queryServer) Params(ctx context.Context, req *types.QueryParamsRequest) (*types.QueryParamsResponse, error) {
+func (s queryServer) Params(c context.Context, req *types.QueryParamsRequest) (*types.QueryParamsResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
+	ctx := sdk.UnwrapSDKContext(c)
 	params := s.k.GetParams(ctx)
 
 	return &types.QueryParamsResponse{Params: params}, nil
 }
 
 // ModuleAccounts returns all the existing Module Accounts
-func (s queryServer) ModuleAccounts(ctx context.Context, req *types.QueryModuleAccountsRequest) (*types.QueryModuleAccountsResponse, error) {
+func (s queryServer) ModuleAccounts(c context.Context, req *types.QueryModuleAccountsRequest) (*types.QueryModuleAccountsResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
+
+	ctx := sdk.UnwrapSDKContext(c)
 
 	// For deterministic output, sort the permAddrs by module name.
 	sortedPermAddrs := make([]string, 0, len(s.k.permAddrs))
@@ -124,7 +121,7 @@ func (s queryServer) ModuleAccounts(ctx context.Context, req *types.QueryModuleA
 		}
 		any, err := codectypes.NewAnyWithValue(account)
 		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
+			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
 		modAccounts = append(modAccounts, any)
 	}
@@ -133,7 +130,7 @@ func (s queryServer) ModuleAccounts(ctx context.Context, req *types.QueryModuleA
 }
 
 // ModuleAccountByName returns module account by module name
-func (s queryServer) ModuleAccountByName(ctx context.Context, req *types.QueryModuleAccountByNameRequest) (*types.QueryModuleAccountByNameResponse, error) {
+func (s queryServer) ModuleAccountByName(c context.Context, req *types.QueryModuleAccountByNameRequest) (*types.QueryModuleAccountByNameResponse, error) {
 	if req == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "empty request")
 	}
@@ -142,6 +139,7 @@ func (s queryServer) ModuleAccountByName(ctx context.Context, req *types.QueryMo
 		return nil, status.Error(codes.InvalidArgument, "module name is empty")
 	}
 
+	ctx := sdk.UnwrapSDKContext(c)
 	moduleName := req.Name
 
 	account := s.k.GetModuleAccount(ctx, moduleName)
@@ -150,7 +148,7 @@ func (s queryServer) ModuleAccountByName(ctx context.Context, req *types.QueryMo
 	}
 	any, err := codectypes.NewAnyWithValue(account)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
 
 	return &types.QueryModuleAccountByNameResponse{Account: any}, nil
@@ -234,7 +232,7 @@ func (s queryServer) AccountInfo(ctx context.Context, req *types.QueryAccountInf
 	if pubKey != nil {
 		pkAny, err = codectypes.NewAnyWithValue(account.GetPubKey())
 		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
+			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
 	}
 

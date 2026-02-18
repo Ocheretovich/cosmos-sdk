@@ -4,13 +4,14 @@ package cosmos.base.tendermint.v1beta1;
 import "gogoproto/gogo.proto";
 import "google/protobuf/any.proto";
 import "google/api/annotations.proto";
-import "cometbft/p2p/v1/types.proto";
-import "cometbft/types/v1/types.proto";
+import "tendermint/p2p/types.proto";
+import "tendermint/types/types.proto";
+import "tendermint/types/params.proto";
+import "tendermint/abci/types.proto";
 import "cosmos/base/query/v1beta1/pagination.proto";
 import "cosmos/base/tendermint/v1beta1/types.proto";
 import "cosmos_proto/cosmos.proto";
-import "cometbft/types/v1/block.proto";
-import "cometbft/crypto/v1/proof.proto";
+import "tendermint/types/block.proto";
 import "amino/amino.proto";
 
 option go_package = "github.com/cosmos/cosmos-sdk/client/grpc/cmtservice";
@@ -51,8 +52,22 @@ service Service {
   // application, bypassing Tendermint completely. The ABCI query must contain
   // a valid and supported path, including app, custom, p2p, and store.
   rpc ABCIQuery(ABCIQueryRequest) returns (ABCIQueryResponse) {
-    option (google.api.http).get          = "/cosmos/base/tendermint/v1beta1/abci_query";
     option (cosmos_proto.method_added_in) = "cosmos-sdk 0.46";
+    option (google.api.http).get          = "/cosmos/base/tendermint/v1beta1/abci_query";
+  }
+
+  // GetLatestBlockResults returns the block results for the latest block.
+  // Block results contain finalize_block_events which include consensus-level
+  // events like slashing, jailing, and validator set updates.
+  rpc GetLatestBlockResults(GetLatestBlockResultsRequest) returns (GetLatestBlockResultsResponse) {
+    option (cosmos_proto.method_added_in) = "cosmos-sdk 0.53";
+    option (google.api.http).get          = "/cosmos/base/tendermint/v1beta1/block_results/latest";
+  }
+
+  // GetBlockResults queries block results for given height.
+  rpc GetBlockResults(GetBlockResultsRequest) returns (GetBlockResultsResponse) {
+    option (cosmos_proto.method_added_in) = "cosmos-sdk 0.53";
+    option (google.api.http).get          = "/cosmos/base/tendermint/v1beta1/block_results/{height}";
   }
 }
 
@@ -100,10 +115,10 @@ message GetBlockByHeightRequest {
 
 // GetBlockByHeightResponse is the response type for the Query/GetBlockByHeight RPC method.
 message GetBlockByHeightResponse {
-  .cometbft.types.v1.BlockID block_id = 1;
+  .tendermint.types.BlockID block_id = 1;
 
   // Deprecated: please use `sdk_block` instead
-  .cometbft.types.v1.Block block = 2;
+  .tendermint.types.Block block = 2;
 
   Block sdk_block = 3 [(cosmos_proto.field_added_in) = "cosmos-sdk 0.47"];
 }
@@ -113,10 +128,10 @@ message GetLatestBlockRequest {}
 
 // GetLatestBlockResponse is the response type for the Query/GetLatestBlock RPC method.
 message GetLatestBlockResponse {
-  .cometbft.types.v1.BlockID block_id = 1;
+  .tendermint.types.BlockID block_id = 1;
 
   // Deprecated: please use `sdk_block` instead
-  .cometbft.types.v1.Block block = 2;
+  .tendermint.types.Block block = 2;
 
   Block sdk_block = 3 [(cosmos_proto.field_added_in) = "cosmos-sdk 0.47"];
 }
@@ -127,6 +142,10 @@ message GetSyncingRequest {}
 // GetSyncingResponse is the response type for the Query/GetSyncing RPC method.
 message GetSyncingResponse {
   bool syncing = 1;
+  // earliest_block_height is the earliest block height available on this node.
+  int64 earliest_block_height = 2;
+  // latest_block_height is the latest block height available on this node.
+  int64 latest_block_height = 3;
 }
 
 // GetNodeInfoRequest is the request type for the Query/GetNodeInfo RPC method.
@@ -134,8 +153,8 @@ message GetNodeInfoRequest {}
 
 // GetNodeInfoResponse is the response type for the Query/GetNodeInfo RPC method.
 message GetNodeInfoResponse {
-  .cometbft.p2p.v1.DefaultNodeInfo default_node_info   = 1;
-  VersionInfo                      application_version = 2;
+  .tendermint.p2p.DefaultNodeInfo default_node_info   = 1;
+  VersionInfo                     application_version = 2;
 }
 
 // VersionInfo is the type for the GetNodeInfoResponse message.
@@ -174,18 +193,16 @@ message ABCIQueryRequest {
 // Tendermint.
 message ABCIQueryResponse {
   uint32 code = 1;
-  // Deprecated: use "value" instead
+  // DEPRECATED: use "value" instead
   reserved 2;
-  string log   = 3; // nondeterministic
-  string info  = 4; // nondeterministic
-  int64  index = 5;
-  bytes  key   = 6;
-  bytes  value = 7;
-  // deprecated in favor of comet proof type
-  reserved 8;
-  int64                        height    = 9;
-  string                       codespace = 10;
-  .cometbft.crypto.v1.ProofOps proof_ops = 11;
+  string   log       = 3; // nondeterministic
+  string   info      = 4; // nondeterministic
+  int64    index     = 5;
+  bytes    key       = 6;
+  bytes    value     = 7;
+  ProofOps proof_ops = 8;
+  int64    height    = 9;
+  string   codespace = 10;
 }
 
 // ProofOp defines an operation used for calculating Merkle root. The data could
@@ -194,16 +211,66 @@ message ABCIQueryResponse {
 //
 // Note: This type is a duplicate of the ProofOp proto type defined in Tendermint.
 message ProofOp {
-  option deprecated = true;
-  string type       = 1;
-  bytes  key        = 2;
-  bytes  data       = 3;
+  string type = 1;
+  bytes  key  = 2;
+  bytes  data = 3;
 }
 
 // ProofOps is Merkle proof defined by the list of ProofOps.
 //
 // Note: This type is a duplicate of the ProofOps proto type defined in Tendermint.
 message ProofOps {
-  option           deprecated = true;
-  repeated ProofOp ops        = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+  repeated ProofOp ops = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+// GetBlockResultsRequest is the request type for the Query/GetBlockResults RPC method.
+message GetBlockResultsRequest {
+  int64 height = 1;
+}
+
+// GetLatestBlockResultsRequest is the request type for the Query/GetLatestBlockResults RPC method.
+message GetLatestBlockResultsRequest {}
+
+// GetBlockResultsResponse is the response type for the Query/GetBlockResults RPC method.
+message GetBlockResultsResponse {
+  // height is the block height.
+  int64 height = 1;
+
+  // txs_results contains the results of each transaction execution.
+  repeated .tendermint.abci.ExecTxResult txs_results = 2;
+
+  // finalize_block_events contains consensus-level events emitted during block
+  // finalization, including slashing, jailing, and validator set updates.
+  repeated .tendermint.abci.Event finalize_block_events = 3;
+
+  // validator_updates contains the validator updates for this block.
+  repeated .tendermint.abci.ValidatorUpdate validator_updates = 4;
+
+  // consensus_param_updates contains any consensus parameter updates for this block.
+  .tendermint.types.ConsensusParams consensus_param_updates = 5;
+
+  // app_hash is the app hash after processing this block.
+  bytes app_hash = 6;
+}
+
+// GetLatestBlockResultsResponse is the response type for the Query/GetLatestBlockResults RPC method.
+message GetLatestBlockResultsResponse {
+  // height is the block height.
+  int64 height = 1;
+
+  // txs_results contains the results of each transaction execution.
+  repeated .tendermint.abci.ExecTxResult txs_results = 2;
+
+  // finalize_block_events contains consensus-level events emitted during block
+  // finalization, including slashing, jailing, and validator set updates.
+  repeated .tendermint.abci.Event finalize_block_events = 3;
+
+  // validator_updates contains the validator updates for this block.
+  repeated .tendermint.abci.ValidatorUpdate validator_updates = 4;
+
+  // consensus_param_updates contains any consensus parameter updates for this block.
+  .tendermint.types.ConsensusParams consensus_param_updates = 5;
+
+  // app_hash is the app hash after processing this block.
+  bytes app_hash = 6;
 }

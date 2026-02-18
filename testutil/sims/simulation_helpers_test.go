@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"cosmossdk.io/store/metrics"
 	"cosmossdk.io/store/rootmulti"
 	storetypes "cosmossdk.io/store/types"
@@ -16,17 +16,13 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/types/kv"
 	"github.com/cosmos/cosmos-sdk/types/simulation"
-)
-
-const (
-	authStoreKey           = "acc"
-	GlobalAccountNumberKey = 0x1
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
 func TestGetSimulationLog(t *testing.T) {
 	legacyAmino := codec.NewLegacyAmino()
 	decoders := make(simulation.StoreDecoderRegistry)
-	decoders[authStoreKey] = func(kvAs, kvBs kv.Pair) string { return "10" }
+	decoders[authtypes.StoreKey] = func(kvAs, kvBs kv.Pair) string { return "10" }
 
 	tests := []struct {
 		store       string
@@ -39,8 +35,8 @@ func TestGetSimulationLog(t *testing.T) {
 			"",
 		},
 		{
-			authStoreKey,
-			[]kv.Pair{{Key: []byte{GlobalAccountNumberKey}, Value: legacyAmino.MustMarshal(uint64(10))}},
+			authtypes.StoreKey,
+			[]kv.Pair{{Key: authtypes.GlobalAccountNumberKey, Value: legacyAmino.MustMarshal(uint64(10))}},
 			"10",
 		},
 		{
@@ -51,7 +47,6 @@ func TestGetSimulationLog(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.store, func(t *testing.T) {
 			require.Equal(t, tt.expectedLog, GetSimulationLog(tt.store, decoders, tt.kvPairs, tt.kvPairs), tt.store)
 		})
@@ -115,6 +110,7 @@ func checkDiffResults(t *testing.T, store1, store2 storetypes.KVStore, noDiff bo
 
 func initTestStores(t *testing.T) (storetypes.KVStore, storetypes.KVStore) {
 	t.Helper()
+
 	db := dbm.NewMemDB()
 	ms := rootmulti.NewStore(db, log.NewNopLogger(), metrics.NewNoOpMetrics())
 
@@ -122,8 +118,6 @@ func initTestStores(t *testing.T) (storetypes.KVStore, storetypes.KVStore) {
 	key2 := storetypes.NewKVStoreKey("store2")
 	require.NotPanics(t, func() { ms.MountStoreWithDB(key1, storetypes.StoreTypeIAVL, db) })
 	require.NotPanics(t, func() { ms.MountStoreWithDB(key2, storetypes.StoreTypeIAVL, db) })
-	require.NotPanics(t, func() {
-		_ = ms.LoadLatestVersion()
-	})
+	require.NotPanics(t, func() { _ = ms.LoadLatestVersion() })
 	return ms.GetKVStore(key1), ms.GetKVStore(key2)
 }

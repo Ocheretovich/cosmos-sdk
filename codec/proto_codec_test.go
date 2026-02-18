@@ -13,14 +13,16 @@ import (
 	protov2 "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	counterv1 "cosmossdk.io/api/cosmos/counter/v1"
-	"cosmossdk.io/x/tx/signing"
+	bankv1beta1 "cosmossdk.io/api/cosmos/bank/v1beta1"
+	basev1beta1 "cosmossdk.io/api/cosmos/base/v1beta1"
+	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/testutil/testdata"
-	countertypes "github.com/cosmos/cosmos-sdk/testutil/x/counter/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	"github.com/cosmos/cosmos-sdk/x/tx/signing"
 )
 
 func createTestInterfaceRegistry() types.InterfaceRegistry {
@@ -34,7 +36,7 @@ func createTestInterfaceRegistry() types.InterfaceRegistry {
 	return interfaceRegistry
 }
 
-func TestProtoMarsharlInterface(t *testing.T) {
+func TestProtoMarshalInterface(t *testing.T) {
 	cdc := codec.NewProtoCodec(createTestInterfaceRegistry())
 	m := interfaceMarshaler{cdc.MarshalInterface, cdc.UnmarshalInterface}
 	testInterfaceMarshaling(require.New(t), m, false)
@@ -111,7 +113,7 @@ func TestProtoCodecMarshal(t *testing.T) {
 	require.NoError(t, err)
 
 	// test typed nil input shouldn't panic
-	var v *countertypes.QueryGetCountRequest
+	var v *banktypes.QueryBalanceResponse
 	bz, err = grpcServerEncode(cartoonCdc.GRPCCodec(), v)
 	require.NoError(t, err)
 	require.Empty(t, bz)
@@ -119,7 +121,7 @@ func TestProtoCodecMarshal(t *testing.T) {
 
 // Emulate grpc server implementation
 // https://github.com/grpc/grpc-go/blob/b1d7f56b81b7902d871111b82dec6ba45f854ede/rpc_util.go#L590
-func grpcServerEncode(c encoding.Codec, msg interface{}) ([]byte, error) {
+func grpcServerEncode(c encoding.Codec, msg any) ([]byte, error) {
 	if msg == nil { // NOTE: typed nils will not be caught by this check
 		return nil, nil
 	}
@@ -163,10 +165,9 @@ func BenchmarkProtoCodecMarshalLengthPrefixed(b *testing.B) {
 		}),
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		blob, err := pCdc.MarshalLengthPrefixed(msg)
 		if err != nil {
 			b.Fatal(err)
@@ -187,16 +188,22 @@ func TestGetSigners(t *testing.T) {
 	cdc := codec.NewProtoCodec(interfaceRegistry)
 	testAddr := sdk.AccAddress("test")
 	testAddrStr := testAddr.String()
+	testAddr2 := sdk.AccAddress("test2")
+	testAddrStr2 := testAddr2.String()
 
-	msgSendV1 := &countertypes.MsgIncreaseCounter{Signer: testAddrStr, Count: 1}
-	msgSendV2 := &counterv1.MsgIncreaseCounter{Signer: testAddrStr, Count: 1}
+	msgSendV1 := banktypes.NewMsgSend(testAddr, testAddr2, sdk.NewCoins(sdk.NewCoin("foo", sdkmath.NewInt(1))))
+	msgSendV2 := &bankv1beta1.MsgSend{
+		FromAddress: testAddrStr,
+		ToAddress:   testAddrStr2,
+		Amount:      []*basev1beta1.Coin{{Denom: "foo", Amount: "1"}},
+	}
 
-	signers, msgSendV2Copy, err := cdc.GetMsgSigners(msgSendV1)
+	signers, msgSendV2Copy, err := cdc.GetMsgV1Signers(msgSendV1)
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{testAddr}, signers)
-	require.True(t, protov2.Equal(msgSendV2, msgSendV2Copy.Interface()))
+	require.True(t, protov2.Equal(msgSendV2, msgSendV2Copy))
 
-	signers, err = cdc.GetReflectMsgSigners(msgSendV2.ProtoReflect())
+	signers, err = cdc.GetMsgV2Signers(msgSendV2)
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{testAddr}, signers)
 
@@ -205,7 +212,7 @@ func TestGetSigners(t *testing.T) {
 	signers, msgSendV2Copy, err = cdc.GetMsgAnySigners(msgSendAny)
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{testAddr}, signers)
-	require.True(t, protov2.Equal(msgSendV2, msgSendV2Copy.Interface()))
+	require.True(t, protov2.Equal(msgSendV2, msgSendV2Copy))
 }
 
 type testAddressCodec struct{}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -12,11 +11,10 @@ import (
 	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
-	"cosmossdk.io/core/address"
 	"cosmossdk.io/core/header"
-	corelog "cosmossdk.io/core/log"
+	"cosmossdk.io/log/v2"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -42,7 +40,7 @@ func initChain(
 	}
 	appState, accounts, chainID, genesisTimestamp := appStateFn(r, accounts, config)
 	consensusParams := randomConsensusParams(r, appState, cdc, blockMaxGas)
-	req := abci.InitChainRequest{
+	req := abci.RequestInitChain{
 		AppStateBytes:   appState,
 		ChainId:         chainID,
 		ConsensusParams: consensusParams,
@@ -59,9 +57,8 @@ func initChain(
 
 // SimulateFromSeed tests an application by running the provided
 // operations, testing the provided invariants, but using the provided config.Seed.
-func SimulateFromSeed( // exists for backwards compatibility only
+func SimulateFromSeed(
 	tb testing.TB,
-	logger corelog.Logger,
 	w io.Writer,
 	app *baseapp.BaseApp,
 	appStateFn simulation.AppStateFn,
@@ -70,18 +67,18 @@ func SimulateFromSeed( // exists for backwards compatibility only
 	blockedAddrs map[string]bool,
 	config simulation.Config,
 	cdc codec.JSONCodec,
-	addressCodec address.Codec,
-) (exportedParams Params, err error) {
+) (stopEarly bool, exportedParams Params, err error) {
 	tb.Helper()
 	mode, _, _ := getTestingMode(tb)
-	return SimulateFromSeedX(tb, logger, w, app, appStateFn, randAccFn, ops, blockedAddrs, config, cdc, addressCodec, NewLogWriter(mode))
+	expParams, _, err := SimulateFromSeedX(tb, log.NewTestLogger(tb), w, app, appStateFn, randAccFn, ops, blockedAddrs, config, cdc, NewLogWriter(mode))
+	return false, expParams, err
 }
 
 // SimulateFromSeedX tests an application by running the provided
 // operations, testing the provided invariants, but using the provided config.Seed.
 func SimulateFromSeedX(
 	tb testing.TB,
-	logger corelog.Logger,
+	logger log.Logger,
 	w io.Writer,
 	app *baseapp.BaseApp,
 	appStateFn simulation.AppStateFn,
@@ -90,14 +87,13 @@ func SimulateFromSeedX(
 	blockedAddrs map[string]bool,
 	config simulation.Config,
 	cdc codec.JSONCodec,
-	addressCodec address.Codec,
 	logWriter LogWriter,
-) (exportedParams Params, err error) {
+) (exportedParams Params, accs []simulation.Account, err error) {
 	tb.Helper()
 	// in case we have to end early, don't os.Exit so that we can run cleanup code.
 	testingMode, _, b := getTestingMode(tb)
 
-	r := rand.New(NewByteSource(config.FuzzSeed, config.Seed))
+	r := rand.New(newByteSource(config.FuzzSeed, config.Seed))
 	params := RandomParams(r)
 
 	startTime := time.Now()
@@ -105,7 +101,7 @@ func SimulateFromSeedX(
 	logger.Debug("Randomized simulation setup", "params", mustMarshalJSONIndent(params))
 
 	timeDiff := maxTimePerBlock - minTimePerBlock
-	accs := randAccFn(r, params.NumKeys())
+	accs = randAccFn(r, params.NumKeys())
 	eventStats := NewEventStats()
 
 	// Second variable to keep pending validator set (delayed one block since
@@ -114,7 +110,7 @@ func SimulateFromSeedX(
 	// At least 2 accounts must be added here, otherwise when executing SimulateMsgSend
 	// two accounts will be selected to meet the conditions from != to and it will fall into an infinite loop.
 	if len(accs) <= 1 {
-		return params, errors.New("at least two genesis accounts are required")
+		return params, accs, fmt.Errorf("at least two genesis accounts are required")
 	}
 
 	config.ChainID = chainID
@@ -123,17 +119,17 @@ func SimulateFromSeedX(
 	var tmpAccs []simulation.Account
 
 	for _, acc := range accs {
-		accAddr, err := addressCodec.BytesToString(acc.Address)
-		if err != nil {
-			return params, err
-		}
-		if !blockedAddrs[accAddr] {
+		if !blockedAddrs[acc.Address.String()] {
 			tmpAccs = append(tmpAccs, acc)
 		}
 	}
 
 	accs = tmpAccs
 	nextValidators := validators
+	if len(nextValidators) == 0 {
+		tb.Skip("skipping: empty validator set in genesis")
+		return params, accs, nil
+	}
 
 	var (
 		pastTimes          []time.Time
@@ -196,11 +192,11 @@ func SimulateFromSeedX(
 		pastVoteInfos = append(pastVoteInfos, finalizeBlockReq.DecidedLastCommit.Votes)
 
 		// Run the BeginBlock handler
-		logWriter.AddEntry(BeginBlockEntry(blockTime, blockHeight))
+		logWriter.AddEntry(BeginBlockEntry(blockHeight))
 
 		res, err := app.FinalizeBlock(finalizeBlockReq)
 		if err != nil {
-			return params, fmt.Errorf("block finalization failed at height %d: %w", blockHeight, err)
+			return params, accs, fmt.Errorf("block finalization failed at height %d: %w", blockHeight, err)
 		}
 
 		ctx := app.NewContextLegacy(false, cmtproto.Header{
@@ -240,7 +236,7 @@ func SimulateFromSeedX(
 
 		blockHeight++
 
-		logWriter.AddEntry(EndBlockEntry(blockTime, blockHeight))
+		logWriter.AddEntry(EndBlockEntry(blockHeight))
 
 		blockTime = blockTime.Add(time.Duration(minTimePerBlock) * time.Second)
 		blockTime = blockTime.Add(time.Duration(int64(r.Intn(int(timeDiff)))) * time.Second)
@@ -249,7 +245,7 @@ func SimulateFromSeedX(
 		if config.Commit {
 			app.SimWriteState()
 			if _, err := app.Commit(); err != nil {
-				return params, fmt.Errorf("commit failed at height %d: %w", blockHeight, err)
+				return params, accs, fmt.Errorf("commit failed at height %d: %w", blockHeight, err)
 			}
 		}
 
@@ -266,6 +262,10 @@ func SimulateFromSeedX(
 		// on the next block
 		validators = nextValidators
 		nextValidators = updateValidators(tb, r, params, validators, res.ValidatorUpdates, eventStats.Tally)
+		if len(nextValidators) == 0 {
+			tb.Skip("skipping: empty validator set")
+			return params, accs, nil
+		}
 
 		// update the exported params
 		if config.ExportParamsPath != "" && int64(config.ExportParamsHeight) == blockHeight {
@@ -282,7 +282,7 @@ func SimulateFromSeedX(
 	} else {
 		eventStats.Print(w)
 	}
-	return exportedParams, err
+	return exportedParams, accs, err
 }
 
 type blockSimFn func(
@@ -323,14 +323,14 @@ func createBlockSimulator(tb testing.TB, printProgress bool, w io.Writer, params
 
 		// Predetermine the blocksize slice so that we can do things like block
 		// out certain operations without changing the ops that follow.
-		for i := 0; i < blocksize; i++ {
+		for range blocksize {
 			opAndRz = append(opAndRz, opAndR{
 				op:   selectOp(r),
 				rand: r,
 			})
 		}
 
-		for i := 0; i < blocksize; i++ {
+		for i := range blocksize {
 			// NOTE: the Rand 'r' should not be used here.
 			opAndR := opAndRz[i]
 			op, r2 := opAndR.op, opAndR.rand
@@ -338,15 +338,15 @@ func createBlockSimulator(tb testing.TB, printProgress bool, w io.Writer, params
 			opMsg.LogEvent(event)
 
 			if !config.Lean || opMsg.OK {
-				logWriter.AddEntry(MsgEntry(header.Time, header.Height, int64(i), opMsg))
+				logWriter.AddEntry(MsgEntry(header.Height, int64(i), opMsg))
 			}
 
 			if err != nil {
 				logWriter.PrintLogs()
-				tb.Fatalf(`error on block  %d/%d, operation (%d/%d) from x/%s:
+				tb.Fatalf(`error on block  %d/%d, operation (%d/%d) from x/%s for msg %q:
 %v
 Comment: %s`,
-					header.Height, config.NumBlocks, opCount, blocksize, opMsg.Route, err, opMsg.Comment)
+					header.Height, config.NumBlocks, opCount, blocksize, opMsg.Route, opMsg.Name, err, opMsg.Comment)
 			}
 
 			queueOperations(operationQueue, timeOperationQueue, futureOps)
@@ -363,10 +363,19 @@ Comment: %s`,
 	}
 }
 
-func runQueuedOperations(tb testing.TB, queueOps map[int][]simulation.Operation,
-	blockTime time.Time, height int, r *rand.Rand, app *baseapp.BaseApp,
-	ctx sdk.Context, accounts []simulation.Account, logWriter LogWriter,
-	event func(route, op, evResult string), lean bool, chainID string,
+func runQueuedOperations(
+	tb testing.TB,
+	queueOps map[int][]simulation.Operation,
+	blockTime time.Time,
+	height int,
+	r *rand.Rand,
+	app *baseapp.BaseApp,
+	ctx sdk.Context,
+	accounts []simulation.Account,
+	logWriter LogWriter,
+	event func(route, op, evResult string),
+	lean bool,
+	chainID string,
 ) (numOpsRan int, allFutureOps []simulation.FutureOperation) {
 	tb.Helper()
 	queuedOp, ok := queueOps[height]
@@ -378,7 +387,7 @@ func runQueuedOperations(tb testing.TB, queueOps map[int][]simulation.Operation,
 	allFutureOps = make([]simulation.FutureOperation, 0)
 
 	numOpsRan = len(queuedOp)
-	for i := 0; i < numOpsRan; i++ {
+	for i := range numOpsRan {
 		opMsg, futureOps, err := queuedOp[i](r, app, ctx, accounts, chainID)
 		if len(futureOps) > 0 {
 			allFutureOps = append(allFutureOps, futureOps...)
@@ -387,7 +396,7 @@ func runQueuedOperations(tb testing.TB, queueOps map[int][]simulation.Operation,
 		opMsg.LogEvent(event)
 
 		if !lean || opMsg.OK {
-			logWriter.AddEntry((QueuedMsgEntry(blockTime, int64(height), opMsg)))
+			logWriter.AddEntry((QueuedMsgEntry(int64(height), opMsg)))
 		}
 
 		if err != nil {
@@ -417,7 +426,7 @@ func runQueuedTimeOperations(tb testing.TB, queueOps []simulation.FutureOperatio
 		opMsg.LogEvent(event)
 
 		if !lean || opMsg.OK {
-			logWriter.AddEntry(QueuedMsgEntry(currentTime, int64(height), opMsg))
+			logWriter.AddEntry(QueuedMsgEntry(int64(height), opMsg))
 		}
 
 		if err != nil {
@@ -441,24 +450,24 @@ const (
 	rngMask = rngMax - 1
 )
 
-// ByteSource offers deterministic pseudo-random numbers for math.Rand with fuzzer support.
+// byteSource offers deterministic pseudo-random numbers for math.Rand with fuzzer support.
 // The 'seed' data is read in big endian to uint64. When exhausted,
 // it falls back to a standard random number generator initialized with a specific 'seed' value.
-type ByteSource struct {
+type byteSource struct {
 	seed     *bytes.Reader
 	fallback *rand.Rand
 }
 
-// NewByteSource creates a new ByteSource with a specified byte slice and seed. This gives a fixed sequence of pseudo-random numbers.
+// newByteSource creates a new byteSource with a specified byte slice and seed. This gives a fixed sequence of pseudo-random numbers.
 // Initially, it utilizes the byte slice. Once that's exhausted, it continues generating numbers using the provided seed.
-func NewByteSource(fuzzSeed []byte, seed int64) *ByteSource {
-	return &ByteSource{
+func newByteSource(fuzzSeed []byte, seed int64) *byteSource {
+	return &byteSource{
 		seed:     bytes.NewReader(fuzzSeed),
 		fallback: rand.New(rand.NewSource(seed)),
 	}
 }
 
-func (s *ByteSource) Uint64() uint64 {
+func (s *byteSource) Uint64() uint64 {
 	if s.seed.Len() < 8 {
 		return s.fallback.Uint64()
 	}
@@ -469,7 +478,7 @@ func (s *ByteSource) Uint64() uint64 {
 	return binary.BigEndian.Uint64(b[:])
 }
 
-func (s *ByteSource) Int63() int64 {
+func (s *byteSource) Int63() int64 {
 	return int64(s.Uint64() & rngMask)
 }
-func (s *ByteSource) Seed(seed int64) {}
+func (s *byteSource) Seed(seed int64) {}

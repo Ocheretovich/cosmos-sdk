@@ -40,11 +40,30 @@ func RejectUnknownFieldsStrict(bz []byte, msg proto.Message, resolver jsonpb.Any
 // This function traverses inside of messages nested via google.protobuf.Any. It does not do any deserialization of the proto.Message.
 // An AnyResolver must be provided for traversing inside google.protobuf.Any's.
 func RejectUnknownFields(bz []byte, msg proto.Message, allowUnknownNonCriticals bool, resolver jsonpb.AnyResolver) (hasUnknownNonCriticals bool, err error) {
+	// recursion limit with same default as https://github.com/protocolbuffers/protobuf-go/blob/v1.35.2/encoding/protowire/wire.go#L28
+	return doRejectUnknownFields(bz, msg, allowUnknownNonCriticals, resolver, 10_000)
+}
+
+func doRejectUnknownFields(
+	bz []byte,
+	msg proto.Message,
+	allowUnknownNonCriticals bool,
+	resolver jsonpb.AnyResolver,
+	recursionLimit int,
+) (hasUnknownNonCriticals bool, err error) {
 	if len(bz) == 0 {
 		return hasUnknownNonCriticals, nil
 	}
+	if recursionLimit == 0 {
+		return false, errors.New("recursion limit reached")
+	}
 
-	fieldDescProtoFromTagNum, _, err := getDescriptorInfo(msg)
+	desc, ok := msg.(descriptorIface)
+	if !ok {
+		return hasUnknownNonCriticals, fmt.Errorf("%T does not have a Descriptor() method", msg)
+	}
+
+	fieldDescProtoFromTagNum, _, err := getDescriptorInfo(desc, msg)
 	if err != nil {
 		return hasUnknownNonCriticals, err
 	}
@@ -125,7 +144,7 @@ func RejectUnknownFields(bz []byte, msg proto.Message, allowUnknownNonCriticals 
 
 		if protoMessageName == ".google.protobuf.Any" {
 			// Firstly typecheck types.Any to ensure nothing snuck in.
-			hasUnknownNonCriticalsChild, err := RejectUnknownFields(fieldBytes, (*types.Any)(nil), allowUnknownNonCriticals, resolver)
+			hasUnknownNonCriticalsChild, err := doRejectUnknownFields(fieldBytes, (*types.Any)(nil), allowUnknownNonCriticals, resolver, recursionLimit-1)
 			hasUnknownNonCriticals = hasUnknownNonCriticals || hasUnknownNonCriticalsChild
 			if err != nil {
 				return hasUnknownNonCriticals, err
@@ -148,7 +167,7 @@ func RejectUnknownFields(bz []byte, msg proto.Message, allowUnknownNonCriticals 
 			}
 		}
 
-		hasUnknownNonCriticalsChild, err := RejectUnknownFields(fieldBytes, msg, allowUnknownNonCriticals, resolver)
+		hasUnknownNonCriticalsChild, err := doRejectUnknownFields(fieldBytes, msg, allowUnknownNonCriticals, resolver, recursionLimit-1)
 		hasUnknownNonCriticals = hasUnknownNonCriticals || hasUnknownNonCriticalsChild
 		if err != nil {
 			return hasUnknownNonCriticals, err
@@ -340,11 +359,7 @@ func unnestDesc(mdescs []*descriptorpb.DescriptorProto, indices []int) *descript
 
 // Invoking descriptorpb.ForMessage(proto.Message.(Descriptor).Descriptor()) is incredibly slow
 // for every single message, thus the need for a hand-rolled custom version that's performant and cacheable.
-func extractFileDescMessageDesc(msg proto.Message) (*descriptorpb.FileDescriptorProto, *descriptorpb.DescriptorProto, error) {
-	desc, ok := msg.(descriptorIface)
-	if !ok {
-		return nil, nil, fmt.Errorf("%T does not have a Descriptor() method", msg)
-	}
+func extractFileDescMessageDesc(desc descriptorIface) (*descriptorpb.FileDescriptorProto, *descriptorpb.DescriptorProto, error) {
 	gzippedPb, indices := desc.Descriptor()
 
 	protoFileToDescMu.RLock()
@@ -390,8 +405,7 @@ var (
 )
 
 // getDescriptorInfo retrieves the mapping of field numbers to their respective field descriptors.
-func getDescriptorInfo(msg proto.Message) (map[int32]*descriptorpb.FieldDescriptorProto, *descriptorpb.DescriptorProto, error) {
-	// we immediately check if the desc is present in the desc
+func getDescriptorInfo(desc descriptorIface, msg proto.Message) (map[int32]*descriptorpb.FieldDescriptorProto, *descriptorpb.DescriptorProto, error) {
 	key := reflect.ValueOf(msg).Type()
 
 	descprotoCacheMu.RLock()
@@ -403,7 +417,7 @@ func getDescriptorInfo(msg proto.Message) (map[int32]*descriptorpb.FieldDescript
 	}
 
 	// Now compute and cache the index.
-	_, md, err := extractFileDescMessageDesc(msg)
+	_, md, err := extractFileDescMessageDesc(desc)
 	if err != nil {
 		return nil, nil, err
 	}

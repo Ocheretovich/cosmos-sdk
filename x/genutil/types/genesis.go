@@ -11,9 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
 	cmtjson "github.com/cometbft/cometbft/libs/json"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
+	cmttime "github.com/cometbft/cometbft/types/time"
 
 	"github.com/cosmos/cosmos-sdk/version"
 )
@@ -67,7 +68,7 @@ func (ag *AppGenesis) ValidateAndComplete() error {
 	}
 
 	if ag.GenesisTime.IsZero() {
-		ag.GenesisTime = time.Now().Round(0).UTC()
+		ag.GenesisTime = cmttime.Now()
 	}
 
 	if err := ag.Consensus.ValidateAndComplete(); err != nil {
@@ -209,7 +210,7 @@ func (cs *ConsensusGenesis) UnmarshalJSON(b []byte) error {
 
 func (cs *ConsensusGenesis) ValidateAndComplete() error {
 	if cs == nil {
-		return errors.New("consensus genesis cannot be nil")
+		return fmt.Errorf("consensus genesis cannot be nil")
 	}
 
 	if cs.Params == nil {

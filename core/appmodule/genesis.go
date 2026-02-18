@@ -2,31 +2,14 @@ package appmodule
 
 import (
 	"context"
-	"encoding/json"
 	"io"
-
-	"cosmossdk.io/core/appmodule/v2"
 )
 
-// HasGenesisBasics is the legacy interface for stateless genesis methods.
-type HasGenesisBasics interface {
-	DefaultGenesis() json.RawMessage
-	ValidateGenesis(json.RawMessage) error
-}
-
-// HasGenesis defines a custom genesis handling API implementation.
-type HasGenesis = appmodule.HasGenesis
-
-// HasABCIGenesis defines a custom genesis handling API implementation for ABCI.
-// (stateful genesis methods which returns validator updates)
-// Most modules should not implement this interface.
-type HasABCIGenesis = appmodule.HasABCIGenesis
-
-// HasGenesisAuto is the extension interface that modules should implement to handle
+// HasGenesis is the extension interface that modules should implement to handle
 // genesis data and state initialization.
 // WARNING: This interface is experimental and may change at any time.
-type HasGenesisAuto interface {
-	appmodule.AppModule
+type HasGenesis interface {
+	AppModule
 
 	// DefaultGenesis writes the default genesis for this module to the target.
 	DefaultGenesis(GenesisTarget) error
@@ -53,7 +36,7 @@ type GenesisSource = func(field string) (io.ReadCloser, error)
 // abstract over a single JSON object or JSON in separate files that can be
 // streamed over. Modules should open a separate io.WriteCloser for each field
 // and should prefer writing fields as arrays when possible to support efficient
-// iteration. It is important the caller closers the writer AND checks the error
+// iteration. It is important the caller closes the writer AND checks the error
 // when done with it. It is expected that a stream of JSON data is written
 // to the writer.
 type GenesisTarget = func(field string) (io.WriteCloser, error)

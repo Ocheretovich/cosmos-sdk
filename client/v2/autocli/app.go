@@ -1,17 +1,20 @@
 package autocli
 
 import (
+	"github.com/cosmos/gogoproto/proto"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
 	"cosmossdk.io/client/v2/autocli/flag"
+	"cosmossdk.io/core/address"
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/depinject"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	sdkflags "github.com/cosmos/cosmos-sdk/client/flags"
+	"github.com/cosmos/cosmos-sdk/runtime"
 )
 
 // AppOptions are autocli options for an app. These options can be built via depinject based on an app config. Ex:
@@ -34,6 +37,11 @@ type AppOptions struct {
 	// module or need to be improved.
 	ModuleOptions map[string]*autocliv1.ModuleOptions `optional:"true"`
 
+	// AddressCodec is the address codec to use for the app.
+	AddressCodec          address.Codec
+	ValidatorAddressCodec runtime.ValidatorAddressCodec
+	ConsensusAddressCodec runtime.ConsensusAddressCodec
+
 	// ClientCtx contains the necessary information needed to execute the commands.
 	ClientCtx client.Context
 }
@@ -54,19 +62,34 @@ type AppOptions struct {
 //	rootCmd := initRootCmd()
 //	err = autoCliOpts.EnhanceRootCommand(rootCmd)
 func (appOptions AppOptions) EnhanceRootCommand(rootCmd *cobra.Command) error {
+	var (
+		mergedFiles flag.FileResolver
+		err         error
+	)
+
+	mergedFiles, err = proto.MergedRegistry()
+	if err != nil {
+		// we can safely ignore this error, as this should have been called somewhere earlier
+		// in the app's lifecycle.
+		mergedFiles = appOptions.ClientCtx.InterfaceRegistry
+	}
+
 	builder := &Builder{
 		Builder: flag.Builder{
 			TypeResolver:          protoregistry.GlobalTypes,
-			FileResolver:          appOptions.ClientCtx.InterfaceRegistry,
-			AddressCodec:          appOptions.ClientCtx.AddressCodec,
-			ValidatorAddressCodec: appOptions.ClientCtx.ValidatorAddressCodec,
-			ConsensusAddressCodec: appOptions.ClientCtx.ConsensusAddressCodec,
+			FileResolver:          mergedFiles,
+			AddressCodec:          appOptions.AddressCodec,
+			ValidatorAddressCodec: appOptions.ValidatorAddressCodec,
+			ConsensusAddressCodec: appOptions.ConsensusAddressCodec,
 		},
 		GetClientConn: func(cmd *cobra.Command) (grpc.ClientConnInterface, error) {
 			return client.GetClientQueryContext(cmd)
 		},
-		AddQueryConnFlags: sdkflags.AddQueryFlagsToCmd,
-		AddTxConnFlags:    sdkflags.AddTxFlagsToCmd,
+		AddQueryConnFlags: func(c *cobra.Command) {
+			sdkflags.AddQueryFlagsToCmd(c)
+			sdkflags.AddKeyringFlags(c.Flags())
+		},
+		AddTxConnFlags: sdkflags.AddTxFlagsToCmd,
 	}
 
 	return appOptions.EnhanceRootCommandWithBuilder(rootCmd, builder)

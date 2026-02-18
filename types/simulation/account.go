@@ -14,10 +14,11 @@ import (
 // eventually more useful data can be placed in here.
 // (e.g. number of coins)
 type Account struct {
-	PrivKey cryptotypes.PrivKey
-	PubKey  cryptotypes.PubKey
-	Address sdk.AccAddress
-	ConsKey cryptotypes.PrivKey
+	PrivKey       cryptotypes.PrivKey
+	PubKey        cryptotypes.PubKey
+	Address       sdk.AccAddress
+	ConsKey       cryptotypes.PrivKey
+	AddressBech32 string
 }
 
 // Equals returns true if two accounts are equal
@@ -31,7 +32,7 @@ func RandomAcc(r *rand.Rand, accs []Account) (Account, int) {
 	return accs[idx], idx
 }
 
-// RandomAccounts deterministic generates n random accounts without duplicates.
+// RandomAccounts deterministically generates n random accounts without duplicates.
 func RandomAccounts(r *rand.Rand, n int) []Account {
 	accs := make([]Account, n)
 	idx := make(map[string]struct{}, n)
@@ -50,10 +51,11 @@ func RandomAccounts(r *rand.Rand, n int) []Account {
 		}
 		idx[string(addr.Bytes())] = struct{}{}
 		accs[i] = Account{
-			Address: addr,
-			PrivKey: privKey,
-			PubKey:  pubKey,
-			ConsKey: ed25519.GenPrivKeyFromSecret(privkeySeed),
+			Address:       addr,
+			PrivKey:       privKey,
+			PubKey:        pubKey,
+			ConsKey:       ed25519.GenPrivKeyFromSecret(privkeySeed),
+			AddressBech32: addr.String(),
 		}
 		i++
 	}
@@ -75,7 +77,7 @@ func FindAccount(accs []Account, address sdk.Address) (Account, bool) {
 // RandomFees returns a random fee by selecting a random coin denomination and
 // amount from the account's available balance. If the user doesn't have enough
 // funds for paying fees, it returns empty coins.
-func RandomFees(r *rand.Rand, spendableCoins sdk.Coins) (sdk.Coins, error) {
+func RandomFees(r *rand.Rand, _ sdk.Context, spendableCoins sdk.Coins) (sdk.Coins, error) {
 	if spendableCoins.Empty() {
 		return nil, nil
 	}

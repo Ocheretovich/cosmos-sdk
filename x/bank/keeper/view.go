@@ -6,14 +6,15 @@ import (
 
 	"cosmossdk.io/collections"
 	"cosmossdk.io/collections/indexes"
-	"cosmossdk.io/core/appmodule"
+	"cosmossdk.io/core/store"
 	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/log/v2"
 	"cosmossdk.io/math"
-	"cosmossdk.io/x/bank/types"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
+	"github.com/cosmos/cosmos-sdk/x/bank/types"
 )
 
 var _ ViewKeeper = (*BaseViewKeeper)(nil)
@@ -39,7 +40,7 @@ func newBalancesIndexes(sb *collections.SchemaBuilder) BalancesIndexes {
 	return BalancesIndexes{
 		Denom: indexes.NewReversePair[math.Int](
 			sb, types.DenomAddressPrefix, "address_by_denom_index",
-			collections.PairKeyCodec(sdk.LengthPrefixedAddressKey(sdk.AccAddressKey), collections.StringKey), //nolint:staticcheck // Note: refer to the LengthPrefixedAddressKey docs to understand why we do this.
+			collections.PairKeyCodec(sdk.LengthPrefixedAddressKey(sdk.AccAddressKey), collections.StringKey), // nolint:staticcheck // Note: refer to the LengthPrefixedAddressKey docs to understand why we do this.
 			indexes.WithReversePairUncheckedValue(),                                                          // denom to address indexes were stored as Key: Join(denom, address) Value: []byte{0}, this will migrate the value to []byte{} in a lazy way.
 		),
 	}
@@ -55,10 +56,10 @@ func (b BalancesIndexes) IndexesList() []collections.Index[collections.Pair[sdk.
 
 // BaseViewKeeper implements a read only keeper implementation of ViewKeeper.
 type BaseViewKeeper struct {
-	appmodule.Environment
-
-	cdc codec.BinaryCodec
-	ak  types.AccountKeeper
+	cdc          codec.BinaryCodec
+	storeService store.KVStoreService
+	ak           types.AccountKeeper
+	logger       log.Logger
 
 	Schema        collections.Schema
 	Supply        collections.Map[string, math.Int]
@@ -69,12 +70,13 @@ type BaseViewKeeper struct {
 }
 
 // NewBaseViewKeeper returns a new BaseViewKeeper.
-func NewBaseViewKeeper(env appmodule.Environment, cdc codec.BinaryCodec, ak types.AccountKeeper) BaseViewKeeper {
-	sb := collections.NewSchemaBuilder(env.KVStoreService)
+func NewBaseViewKeeper(cdc codec.BinaryCodec, storeService store.KVStoreService, ak types.AccountKeeper, logger log.Logger) BaseViewKeeper {
+	sb := collections.NewSchemaBuilder(storeService)
 	k := BaseViewKeeper{
-		Environment:   env,
 		cdc:           cdc,
+		storeService:  storeService,
 		ak:            ak,
+		logger:        logger,
 		Supply:        collections.NewMap(sb, types.SupplyKey, "supply", collections.StringKey, sdk.IntValue),
 		DenomMetadata: collections.NewMap(sb, types.DenomMetadataPrefix, "denom_metadata", collections.StringKey, codec.CollValue[types.Metadata](cdc)),
 		SendEnabled:   collections.NewMap(sb, types.SendEnabledPrefix, "send_enabled", collections.StringKey, codec.BoolValue), // NOTE: we use a bool value which uses protobuf to retain state backwards compat
@@ -95,41 +97,40 @@ func (k BaseViewKeeper) HasBalance(ctx context.Context, addr sdk.AccAddress, amt
 	return k.GetBalance(ctx, addr, amt.Denom).IsGTE(amt)
 }
 
+// Logger returns a module-specific logger.
+func (k BaseViewKeeper) Logger() log.Logger {
+	return k.logger
+}
+
 // GetAllBalances returns all the account balances for the given account address.
 func (k BaseViewKeeper) GetAllBalances(ctx context.Context, addr sdk.AccAddress) sdk.Coins {
 	balances := sdk.NewCoins()
 	k.IterateAccountBalances(ctx, addr, func(balance sdk.Coin) bool {
-		balances = balances.Add(balance)
+		balances = append(balances, balance)
 		return false
 	})
 
-	return balances.Sort()
+	return balances
 }
 
 // GetAccountsBalances returns all the accounts balances from the store.
 func (k BaseViewKeeper) GetAccountsBalances(ctx context.Context) []types.Balance {
 	balances := make([]types.Balance, 0)
-	mapAddressToBalancesIdx := make(map[string]int)
 
 	k.IterateAllBalances(ctx, func(addr sdk.AccAddress, balance sdk.Coin) bool {
-		addrStr, err := k.ak.AddressCodec().BytesToString(addr)
-		if err != nil {
-			panic(err)
-		}
-		idx, ok := mapAddressToBalancesIdx[addrStr]
-		if ok {
-			// address is already on the set of accounts balances
-			balances[idx].Coins = balances[idx].Coins.Add(balance)
-			balances[idx].Coins.Sort()
+		addrStr := addr.String()
+		if len(balances) > 0 && balances[len(balances)-1].Address == addrStr {
+			// Same address as last entry = add the coin to it.
+			balances[len(balances)-1].Coins = append(balances[len(balances)-1].Coins, balance)
 			return false
 		}
 
+		// New address = new entry.
 		accountBalance := types.Balance{
 			Address: addrStr,
 			Coins:   sdk.NewCoins(balance),
 		}
 		balances = append(balances, accountBalance)
-		mapAddressToBalancesIdx[addrStr] = len(balances) - 1
 		return false
 	})
 
@@ -179,7 +180,8 @@ func (k BaseViewKeeper) LockedCoins(ctx context.Context, addr sdk.AccAddress) sd
 	if acc != nil {
 		vacc, ok := acc.(types.VestingAccount)
 		if ok {
-			return vacc.LockedCoins(k.HeaderService.HeaderInfo(ctx).Time)
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			return vacc.LockedCoins(sdkCtx.BlockTime())
 		}
 	}
 
@@ -212,10 +214,10 @@ func (k BaseViewKeeper) spendableCoins(ctx context.Context, addr sdk.AccAddress)
 	spendable, hasNeg := total.SafeSub(locked...)
 	if hasNeg {
 		spendable = sdk.NewCoins()
-		return
+		return spendable, total
 	}
 
-	return
+	return spendable, total
 }
 
 // ValidateBalance validates all balances for a given account address returning

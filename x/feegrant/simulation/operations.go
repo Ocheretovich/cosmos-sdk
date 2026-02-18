@@ -4,18 +4,20 @@ import (
 	"math/rand"
 
 	"cosmossdk.io/core/address"
-	"cosmossdk.io/x/feegrant"
-	"cosmossdk.io/x/feegrant/keeper"
 
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	"github.com/cosmos/cosmos-sdk/x/feegrant"
+	"github.com/cosmos/cosmos-sdk/x/feegrant/keeper"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
 )
 
 // Simulation operation weights constants
+// will be removed in the future
 const (
 	OpWeightMsgGrantAllowance        = "op_weight_msg_grant_fee_allowance"
 	OpWeightMsgRevokeAllowance       = "op_weight_msg_grant_revoke_allowance"
@@ -23,15 +25,17 @@ const (
 	DefaultWeightRevokeAllowance int = 100
 )
 
+// will be removed in the future
 var (
 	TypeMsgGrantAllowance  = sdk.MsgTypeURL(&feegrant.MsgGrantAllowance{})
 	TypeMsgRevokeAllowance = sdk.MsgTypeURL(&feegrant.MsgRevokeAllowance{})
 )
 
+// WeightedOperations will be removed in the future in favor of msg factory
 func WeightedOperations(
 	registry codectypes.InterfaceRegistry,
 	appParams simtypes.AppParams,
-	cdc codec.JSONCodec,
+	_ codec.JSONCodec,
 	txConfig client.TxConfig,
 	ak feegrant.AccountKeeper,
 	bk feegrant.BankKeeper,
@@ -64,12 +68,13 @@ func WeightedOperations(
 		),
 		simulation.NewWeightedOperation(
 			weightMsgRevokeAllowance,
-			SimulateMsgRevokeAllowance(pCdc, txConfig, ak, bk, k),
+			SimulateMsgRevokeAllowance(pCdc, txConfig, ak, bk, k, ac),
 		),
 	}
 }
 
 // SimulateMsgGrantAllowance generates MsgGrantAllowance with random values.
+// will be removed in the future in favor of msg factory
 func SimulateMsgGrantAllowance(
 	cdc *codec.ProtoCodec,
 	txConfig client.TxConfig,
@@ -78,20 +83,11 @@ func SimulateMsgGrantAllowance(
 	k keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		granter, _ := simtypes.RandomAcc(r, accs)
 		grantee, _ := simtypes.RandomAcc(r, accs)
-		granterStr, err := ak.AddressCodec().BytesToString(granter.Address)
-		if err != nil {
-			return simtypes.OperationMsg{}, nil, err
-		}
-		granteeStr, err := ak.AddressCodec().BytesToString(grantee.Address)
-		if err != nil {
-			return simtypes.OperationMsg{}, nil, err
-		}
-
-		if granteeStr == granterStr {
+		if grantee.Address.String() == granter.Address.String() {
 			return simtypes.NoOpMsg(feegrant.ModuleName, TypeMsgGrantAllowance, "grantee and granter cannot be same"), nil, nil
 		}
 
@@ -106,11 +102,11 @@ func SimulateMsgGrantAllowance(
 			return simtypes.NoOpMsg(feegrant.ModuleName, TypeMsgGrantAllowance, "unable to grant empty coins as SpendLimit"), nil, nil
 		}
 
-		oneYear := ctx.HeaderInfo().Time.AddDate(1, 0, 0)
+		oneYear := ctx.BlockTime().AddDate(1, 0, 0)
 		msg, err := feegrant.NewMsgGrantAllowance(&feegrant.BasicAllowance{
 			SpendLimit: spendableCoins,
 			Expiration: &oneYear,
-		}, granterStr, granteeStr)
+		}, granter.Address, grantee.Address)
 		if err != nil {
 			return simtypes.NoOpMsg(feegrant.ModuleName, TypeMsgGrantAllowance, err.Error()), nil, err
 		}
@@ -134,26 +130,27 @@ func SimulateMsgGrantAllowance(
 }
 
 // SimulateMsgRevokeAllowance generates a MsgRevokeAllowance with random values.
+// will be removed in the future in favor of msg factory
 func SimulateMsgRevokeAllowance(
 	cdc *codec.ProtoCodec,
 	txConfig client.TxConfig,
 	ak feegrant.AccountKeeper,
 	bk feegrant.BankKeeper,
 	k keeper.Keeper,
+	ac address.Codec,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		hasGrant := false
-
 		var granterAddr sdk.AccAddress
 		var granteeAddr sdk.AccAddress
-		err := k.IterateAllFeeAllowances(ctx, func(grant feegrant.Grant) bool {
-			granter, err := ak.AddressCodec().StringToBytes(grant.Granter)
+		if err := k.IterateAllFeeAllowances(ctx, func(grant feegrant.Grant) bool {
+			granter, err := ac.StringToBytes(grant.Granter)
 			if err != nil {
 				panic(err)
 			}
-			grantee, err := ak.AddressCodec().StringToBytes(grant.Grantee)
+			grantee, err := ac.StringToBytes(grant.Grantee)
 			if err != nil {
 				panic(err)
 			}
@@ -161,9 +158,8 @@ func SimulateMsgRevokeAllowance(
 			granteeAddr = grantee
 			hasGrant = true
 			return true
-		})
-		if err != nil {
-			return simtypes.OperationMsg{}, nil, err
+		}); err != nil {
+			return simtypes.NoOpMsg(feegrant.ModuleName, TypeMsgRevokeAllowance, "no grants"), nil, err
 		}
 
 		if !hasGrant {
@@ -178,15 +174,7 @@ func SimulateMsgRevokeAllowance(
 		account := ak.GetAccount(ctx, granter.Address)
 		spendableCoins := bk.SpendableCoins(ctx, account.GetAddress())
 
-		granterStr, err := ak.AddressCodec().BytesToString(granterAddr)
-		if err != nil {
-			return simtypes.NoOpMsg(feegrant.ModuleName, TypeMsgRevokeAllowance, err.Error()), nil, err
-		}
-		granteeStr, err := ak.AddressCodec().BytesToString(granteeAddr)
-		if err != nil {
-			return simtypes.NoOpMsg(feegrant.ModuleName, TypeMsgRevokeAllowance, err.Error()), nil, err
-		}
-		msg := feegrant.NewMsgRevokeAllowance(granterStr, granteeStr)
+		msg := feegrant.NewMsgRevokeAllowance(granterAddr, granteeAddr)
 
 		txCtx := simulation.OperationInput{
 			R:               r,

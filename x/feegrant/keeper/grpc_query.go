@@ -8,17 +8,17 @@ import (
 	"google.golang.org/grpc/status"
 
 	"cosmossdk.io/collections"
-	"cosmossdk.io/x/feegrant"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
+	"github.com/cosmos/cosmos-sdk/x/feegrant"
 )
 
 var _ feegrant.QueryServer = Keeper{}
 
 // Allowance returns granted allowance to the grantee by the granter.
-func (q Keeper) Allowance(ctx context.Context, req *feegrant.QueryAllowanceRequest) (*feegrant.QueryAllowanceResponse, error) {
+func (q Keeper) Allowance(c context.Context, req *feegrant.QueryAllowanceRequest) (*feegrant.QueryAllowanceResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid request")
 	}
@@ -33,9 +33,11 @@ func (q Keeper) Allowance(ctx context.Context, req *feegrant.QueryAllowanceReque
 		return nil, err
 	}
 
+	ctx := sdk.UnwrapSDKContext(c)
+
 	feeAllowance, err := q.GetAllowance(ctx, granterAddr, granteeAddr)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
 
 	msg, ok := feeAllowance.(proto.Message)
@@ -45,7 +47,7 @@ func (q Keeper) Allowance(ctx context.Context, req *feegrant.QueryAllowanceReque
 
 	feeAllowanceAny, err := codectypes.NewAnyWithValue(msg)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
 
 	return &feegrant.QueryAllowanceResponse{

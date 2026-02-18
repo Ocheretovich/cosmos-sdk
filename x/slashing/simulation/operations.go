@@ -4,9 +4,7 @@ import (
 	"errors"
 	"math/rand"
 
-	"cosmossdk.io/x/slashing/keeper"
-	"cosmossdk.io/x/slashing/types"
-
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -15,16 +13,20 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
+	"github.com/cosmos/cosmos-sdk/x/slashing/keeper"
+	"github.com/cosmos/cosmos-sdk/x/slashing/types"
 )
 
 // Simulation operation weights constants
+// will be removed in the future
 const (
 	OpWeightMsgUnjail = "op_weight_msg_unjail"
 
-	DefaultWeightMsgUnjail = 100
+	DefaultWeightMsgUnjail = 5 // Reduced from 100 since validators are rarely jailed in simulations
 )
 
 // WeightedOperations returns all the operations from the module with their respective weights
+// migrate to the msg factories instead, this method will be removed in the future
 func WeightedOperations(
 	registry codectypes.InterfaceRegistry,
 	appParams simtypes.AppParams,
@@ -49,6 +51,7 @@ func WeightedOperations(
 }
 
 // SimulateMsgUnjail generates a MsgUnjail with random values
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgUnjail(
 	cdc *codec.ProtoCodec,
 	txGen client.TxConfig,
@@ -58,7 +61,7 @@ func SimulateMsgUnjail(
 	sk types.StakingKeeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context,
 		accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgUnjail{})
@@ -84,25 +87,33 @@ func SimulateMsgUnjail(
 		}
 
 		if !validator.IsJailed() {
-			// TODO: due to this condition this message is almost, if not always, skipped !
+			// This operation is often skipped because validators are rarely jailed in simulations.
+			// The weight has been reduced to 5 to reflect this reality.
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "validator is not jailed"), nil, nil
 		}
 
 		consAddr, err := validator.GetConsAddr()
 		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to get validator consensus key"), nil, err
+			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to get validator consensus key"), nil, nil
 		}
-		info, _ := k.ValidatorSigningInfo.Get(ctx, consAddr)
+		info, err := k.GetValidatorSigningInfo(ctx, consAddr)
+		if err != nil {
+			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to find validator signing info"), nil, nil
+		}
 
-		selfDel, _ := sk.Delegation(ctx, simAccount.Address, bz)
+		selfDel, err := sk.Delegation(ctx, simAccount.Address, bz)
+		if err != nil {
+			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to get self delegation"), nil, nil
+		}
+
 		if selfDel == nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "self delegation is nil"), nil, nil // skip
+			return simtypes.NoOpMsg(types.ModuleName, msgType, "self delegation is nil"), nil, nil
 		}
 
 		account := ak.GetAccount(ctx, sdk.AccAddress(bz))
 		spendable := bk.SpendableCoins(ctx, account.GetAddress())
 
-		fees, err := simtypes.RandomFees(r, spendable)
+		fees, err := simtypes.RandomFees(r, ctx, spendable)
 		if err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to generate fees"), nil, nil
 		}
@@ -131,14 +142,14 @@ func SimulateMsgUnjail(
 		// - validator is still in jailed period
 		// - self delegation too low
 		if info.Tombstoned ||
-			ctx.HeaderInfo().Time.Before(info.JailedUntil) ||
+			ctx.BlockHeader().Time.Before(info.JailedUntil) ||
 			selfDel.GetShares().IsNil() ||
 			validator.TokensFromShares(selfDel.GetShares()).TruncateInt().LT(validator.GetMinSelfDelegation()) {
 			if res != nil && err == nil {
 				if info.Tombstoned {
 					return simtypes.NewOperationMsg(msg, true, ""), nil, errors.New("validator should not have been unjailed if validator tombstoned")
 				}
-				if ctx.HeaderInfo().Time.Before(info.JailedUntil) {
+				if ctx.BlockHeader().Time.Before(info.JailedUntil) {
 					return simtypes.NewOperationMsg(msg, true, ""), nil, errors.New("validator unjailed while validator still in jail period")
 				}
 				if selfDel.GetShares().IsNil() ||

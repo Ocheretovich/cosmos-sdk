@@ -2,9 +2,9 @@ package keyring
 
 import (
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
-	authsigning "cosmossdk.io/x/auth/signing"
 
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
+	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 )
 
 // autoCLIKeyring represents the keyring interface used by the AutoCLI.
@@ -48,7 +48,7 @@ func (a *autoCLIKeyringAdapter) List() ([]string, error) {
 
 // LookupAddressByKeyName returns the address of a key stored in the keyring
 func (a *autoCLIKeyringAdapter) LookupAddressByKeyName(name string) ([]byte, error) {
-	record, err := a.Keyring.Key(name)
+	record, err := a.Key(name)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (a *autoCLIKeyringAdapter) LookupAddressByKeyName(name string) ([]byte, err
 }
 
 func (a *autoCLIKeyringAdapter) GetPubKey(name string) (cryptotypes.PubKey, error) {
-	record, err := a.Keyring.Key(name)
+	record, err := a.Key(name)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (a *autoCLIKeyringAdapter) GetPubKey(name string) (cryptotypes.PubKey, erro
 }
 
 func (a *autoCLIKeyringAdapter) Sign(name string, msg []byte, signMode signingv1beta1.SignMode) ([]byte, error) {
-	record, err := a.Keyring.Key(name)
+	record, err := a.Key(name)
 	if err != nil {
 		return nil, err
 	}

@@ -159,7 +159,7 @@ func (c *Context) Validate() error {
 				md := sd.Methods().Get(j).Input()
 				_, hasCustomSigner := c.customGetSignerFuncs[md.FullName()]
 				if _, err := getSignersFieldNames(md); err == nil && hasCustomSigner {
-					errs = append(errs, fmt.Errorf("a custom signer function as been defined for message %s which already has a signer field defined with (cosmos.msg.v1.signer)", md.FullName()))
+					errs = append(errs, fmt.Errorf("a custom signer function has been defined for message %s which already has a signer field defined with (cosmos.msg.v1.signer)", md.FullName()))
 					continue
 				}
 				_, err := c.getGetSignersFn(md)
@@ -248,9 +248,9 @@ func (c *Context) makeGetSignersFunc(descriptor protoreflect.MessageDescriptor) 
 							arr = append(arr, res...)
 						}
 						return arr, nil
-					} else {
-						return fieldGetter(msg.Get(childField).Message(), depth+1)
 					}
+
+					return fieldGetter(msg.Get(childField).Message(), depth+1)
 				case childField.IsMap() || childField.HasOptionalKeyword():
 					return nil, fmt.Errorf("cosmos.msg.v1.signer field %s in message %s must not be a map or optional", signerFieldName, desc.FullName())
 				case childField.Kind() == protoreflect.StringKind:
@@ -268,14 +268,14 @@ func (c *Context) makeGetSignersFunc(descriptor protoreflect.MessageDescriptor) 
 							res = append(res, addrBz)
 						}
 						return res, nil
-					} else {
-						addrStr := msg.Get(childField).String()
-						addrBz, err := addrCdc.StringToBytes(addrStr)
-						if err != nil {
-							return nil, err
-						}
-						return [][]byte{addrBz}, nil
 					}
+
+					addrStr := msg.Get(childField).String()
+					addrBz, err := addrCdc.StringToBytes(addrStr)
+					if err != nil {
+						return nil, err
+					}
+					return [][]byte{addrBz}, nil
 				}
 				return nil, fmt.Errorf("unexpected field type %s for field %s in message %s, only string and message type are supported",
 					childField.Kind(), signerFieldName, desc.FullName())
@@ -301,13 +301,33 @@ func (c *Context) makeGetSignersFunc(descriptor protoreflect.MessageDescriptor) 
 				}
 				return arr, nil
 			}
+		case protoreflect.BytesKind:
+			if field.IsList() {
+				fieldGetters[i] = func(msg proto.Message, arr [][]byte) ([][]byte, error) {
+					list := msg.ProtoReflect().Get(field).List()
+					n := list.Len()
+					for i := 0; i < n; i++ {
+						addrBz := list.Get(i).Bytes()
+						arr = append(arr, addrBz)
+					}
+					return arr, nil
+				}
+			} else {
+				fieldGetters[i] = func(msg proto.Message, arr [][]byte) ([][]byte, error) {
+					addrBz := msg.ProtoReflect().Get(field).Bytes()
+					return append(arr, addrBz), nil
+				}
+			}
 		default:
 			return nil, fmt.Errorf("unexpected field type %s for field %s in message %s", field.Kind(), fieldName, descriptor.FullName())
 		}
 	}
 
 	return func(message proto.Message) ([][]byte, error) {
-		var signers [][]byte
+		var (
+			signers [][]byte
+			err     error
+		)
 		for _, getter := range fieldGetters {
 			signers, err = getter(message, signers)
 			if err != nil {

@@ -85,6 +85,35 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Short:     "Query the amount of coins in the community pool",
 					Example:   fmt.Sprintf(`$ %s query distribution community-pool`, version.AppName),
 				},
+				{
+					RpcMethod: "ValidatorHistoricalRewards",
+					Use:       "validator-historical-rewards [validator] [period]",
+					Short:     "Query validator historical rewards for a specific period",
+					Example:   fmt.Sprintf(`$ %s query distribution validator-historical-rewards [validator-address] 5`, version.AppName),
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "validator_address"},
+						{ProtoField: "period"},
+					},
+				},
+				{
+					RpcMethod: "ValidatorCurrentRewards",
+					Use:       "validator-current-rewards [validator]",
+					Short:     "Query validator current rewards",
+					Example:   fmt.Sprintf(`$ %s query distribution validator-current-rewards [validator-address]`, version.AppName),
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "validator_address"},
+					},
+				},
+				{
+					RpcMethod: "DelegatorStartingInfo",
+					Use:       "delegator-starting-info [delegator-address] [validator-address]",
+					Short:     "Query delegator starting info for a delegation",
+					Example:   fmt.Sprintf(`$ %s query distribution delegator-starting-info [delegator-address] [validator-address]`, version.AppName),
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "delegator_address"},
+						{ProtoField: "validator_address"},
+					},
+				},
 			},
 		},
 		Tx: &autocliv1.ServiceCommandDescriptor{
@@ -126,11 +155,10 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					},
 				},
 				{
-					RpcMethod:  "FundCommunityPool",
-					Deprecated: fmt.Sprintf("Use %s tx protocolpool fund-community-pool", version.AppName),
-					Use:        "fund-community-pool [amount]",
-					Short:      "Funds the community pool with the specified amount",
-					Example:    fmt.Sprintf(`$ %s tx distribution fund-community-pool 100uatom --from mykey`, version.AppName),
+					RpcMethod: "FundCommunityPool",
+					Use:       "fund-community-pool [amount]",
+					Short:     "Funds the community pool with the specified amount",
+					Example:   fmt.Sprintf(`$ %s tx distribution fund-community-pool 100uatom --from mykey`, version.AppName),
 					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
 						{ProtoField: "amount", Varargs: true},
 					},
@@ -145,7 +173,14 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				},
 				{
 					RpcMethod: "CommunityPoolSpend",
-					Skip:      true, // skipped because deprecated in favor of protocolpool
+					Use:       "community-pool-spend-proposal [recipient] [amount]",
+					Example:   fmt.Sprintf(`$ %s tx distribution community-pool-spend-proposal [recipient] 100uatom`, version.AppName),
+					Short:     "Submit a proposal to spend from the community pool",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "recipient"},
+						{ProtoField: "amount", Varargs: true},
+					},
+					GovProposal: true,
 				},
 			},
 			EnhanceCustomCommand: true,

@@ -1,26 +1,24 @@
 package types
 
 import (
-	corelegacy "cosmossdk.io/core/legacy"
-	"cosmossdk.io/core/registry"
-	coretransaction "cosmossdk.io/core/transaction"
-	"cosmossdk.io/x/auth/migrations/legacytx"
-
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/codec/legacy"
+	"github.com/cosmos/cosmos-sdk/codec/types"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/auth/migrations/legacytx"
 )
 
 // RegisterLegacyAminoCodec registers the account interfaces and concrete types on the
 // provided LegacyAmino codec. These types are used for Amino JSON serialization
-func RegisterLegacyAminoCodec(cdc corelegacy.Amino) {
+func RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
 	cdc.RegisterInterface((*sdk.ModuleAccountI)(nil), nil)
 	cdc.RegisterInterface((*GenesisAccount)(nil), nil)
 	cdc.RegisterInterface((*sdk.AccountI)(nil), nil)
-	cdc.RegisterConcrete(&BaseAccount{}, "cosmos-sdk/BaseAccount")
-	cdc.RegisterConcrete(&ModuleAccount{}, "cosmos-sdk/ModuleAccount")
-	cdc.RegisterConcrete(Params{}, "cosmos-sdk/x/auth/Params")
-	cdc.RegisterConcrete(&ModuleCredential{}, "cosmos-sdk/GroupAccountCredential")
+	cdc.RegisterConcrete(&BaseAccount{}, "cosmos-sdk/BaseAccount", nil)
+	cdc.RegisterConcrete(&ModuleAccount{}, "cosmos-sdk/ModuleAccount", nil)
+	cdc.RegisterConcrete(Params{}, "cosmos-sdk/x/auth/Params", nil)
+	cdc.RegisterConcrete(&ModuleCredential{}, "cosmos-sdk/GroupAccountCredential", nil)
 
 	legacy.RegisterAminoMsg(cdc, &MsgUpdateParams{}, "cosmos-sdk/x/auth/MsgUpdateParams")
 
@@ -29,36 +27,35 @@ func RegisterLegacyAminoCodec(cdc corelegacy.Amino) {
 
 // RegisterInterfaces associates protoName with AccountI interface
 // and creates a registry of it's concrete implementations
-func RegisterInterfaces(registrar registry.InterfaceRegistrar) {
-	registrar.RegisterInterface(
+func RegisterInterfaces(registry types.InterfaceRegistry) {
+	registry.RegisterInterface(
 		"cosmos.auth.v1beta1.AccountI",
 		(*AccountI)(nil),
 		&BaseAccount{},
 		&ModuleAccount{},
 	)
 
-	registrar.RegisterInterface(
+	registry.RegisterInterface(
 		"cosmos.auth.v1beta1.AccountI",
 		(*sdk.AccountI)(nil),
 		&BaseAccount{},
 		&ModuleAccount{},
 	)
 
-	registrar.RegisterInterface(
+	registry.RegisterInterface(
 		"cosmos.auth.v1beta1.GenesisAccount",
 		(*GenesisAccount)(nil),
 		&BaseAccount{},
 		&ModuleAccount{},
 	)
 
-	registrar.RegisterInterface(
+	registry.RegisterInterface(
 		"cosmos.auth.v1.ModuleCredential",
 		(*cryptotypes.PubKey)(nil),
 		&ModuleCredential{},
 	)
 
-	registrar.RegisterImplementations((*coretransaction.Msg)(nil),
+	registry.RegisterImplementations((*sdk.Msg)(nil),
 		&MsgUpdateParams{},
-		&MsgNonAtomicExec{},
 	)
 }

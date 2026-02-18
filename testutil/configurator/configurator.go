@@ -1,34 +1,31 @@
 package configurator
 
 import (
-	accountsmodulev1 "cosmossdk.io/api/cosmos/accounts/module/v1"
 	runtimev1alpha1 "cosmossdk.io/api/cosmos/app/runtime/v1alpha1"
 	appv1alpha1 "cosmossdk.io/api/cosmos/app/v1alpha1"
 	authmodulev1 "cosmossdk.io/api/cosmos/auth/module/v1"
 	authzmodulev1 "cosmossdk.io/api/cosmos/authz/module/v1"
 	bankmodulev1 "cosmossdk.io/api/cosmos/bank/module/v1"
-	circuitmodulev1 "cosmossdk.io/api/cosmos/circuit/module/v1"
 	consensusmodulev1 "cosmossdk.io/api/cosmos/consensus/module/v1"
-	countermodulev1 "cosmossdk.io/api/cosmos/counter/module/v1"
 	distrmodulev1 "cosmossdk.io/api/cosmos/distribution/module/v1"
-	epochsmodulev1 "cosmossdk.io/api/cosmos/epochs/module/v1"
 	evidencemodulev1 "cosmossdk.io/api/cosmos/evidence/module/v1"
 	feegrantmodulev1 "cosmossdk.io/api/cosmos/feegrant/module/v1"
 	genutilmodulev1 "cosmossdk.io/api/cosmos/genutil/module/v1"
 	govmodulev1 "cosmossdk.io/api/cosmos/gov/module/v1"
-	groupmodulev1 "cosmossdk.io/api/cosmos/group/module/v1"
 	mintmodulev1 "cosmossdk.io/api/cosmos/mint/module/v1"
-	nftmodulev1 "cosmossdk.io/api/cosmos/nft/module/v1"
 	paramsmodulev1 "cosmossdk.io/api/cosmos/params/module/v1"
-	poolmodulev1 "cosmossdk.io/api/cosmos/protocolpool/module/v1"
+	protocolpoolmodulev1 "cosmossdk.io/api/cosmos/protocolpool/module/v1"
 	slashingmodulev1 "cosmossdk.io/api/cosmos/slashing/module/v1"
 	stakingmodulev1 "cosmossdk.io/api/cosmos/staking/module/v1"
 	txconfigv1 "cosmossdk.io/api/cosmos/tx/config/v1"
 	vestingmodulev1 "cosmossdk.io/api/cosmos/vesting/module/v1"
+	"cosmossdk.io/core/appconfig"
 	"cosmossdk.io/depinject"
-	"cosmossdk.io/depinject/appconfig"
 
-	"github.com/cosmos/cosmos-sdk/testutil"
+	circuitmodulev1 "github.com/cosmos/cosmos-sdk/contrib/api/cosmos/circuit/module/v1"
+	groupmodulev1 "github.com/cosmos/cosmos-sdk/contrib/api/cosmos/group/module/v1"
+	nftmodulev1 "github.com/cosmos/cosmos-sdk/contrib/api/cosmos/nft/module/v1"
+	protocolpooltypes "github.com/cosmos/cosmos-sdk/x/protocolpool/types"
 )
 
 // Config should never need to be instantiated manually and is solely used for ModuleOption.
@@ -45,70 +42,69 @@ func defaultConfig() *Config {
 	return &Config{
 		ModuleConfigs: make(map[string]*appv1alpha1.ModuleConfig),
 		PreBlockersOrder: []string{
-			testutil.UpgradeModuleName,
+			"upgrade",
 		},
 		BeginBlockersOrder: []string{
-			testutil.MintModuleName,
-			testutil.DistributionModuleName,
-			testutil.ProtocolPoolModuleName,
-			testutil.SlashingModuleName,
-			testutil.EvidenceModuleName,
-			testutil.StakingModuleName,
-			testutil.AuthModuleName,
-			testutil.BankModuleName,
-			testutil.GovModuleName,
+			"mint",
+			"distribution",
+			"slashing",
+			"evidence",
+			"staking",
+			"auth",
+			"bank",
+			"gov",
 			"genutil",
-			testutil.AuthzModuleName,
-			testutil.FeegrantModuleName,
-			testutil.NFTModuleName,
-			testutil.GroupModuleName,
+			"authz",
+			"feegrant",
+			"nft",
+			"group",
+			"params",
 			"consensus",
-			testutil.ParamsModuleName,
 			"vesting",
-			testutil.CircuitModuleName,
-			testutil.EpochsModuleName,
+			"circuit",
+			"protocolpool",
 		},
 		EndBlockersOrder: []string{
-			testutil.GovModuleName,
-			testutil.StakingModuleName,
-			testutil.AuthModuleName,
-			testutil.BankModuleName,
-			testutil.DistributionModuleName,
-			testutil.SlashingModuleName,
-			testutil.MintModuleName,
+			"gov",
+			"staking",
+			"auth",
+			"bank",
+			"distribution",
+			"slashing",
+			"mint",
 			"genutil",
-			testutil.EvidenceModuleName,
-			testutil.AuthzModuleName,
-			testutil.FeegrantModuleName,
-			testutil.NFTModuleName,
-			testutil.GroupModuleName,
+			"evidence",
+			"authz",
+			"feegrant",
+			"nft",
+			"group",
+			"params",
 			"consensus",
-			testutil.UpgradeModuleName,
+			"upgrade",
 			"vesting",
-			testutil.CircuitModuleName,
-			testutil.ProtocolPoolModuleName,
+			"circuit",
+			"protocolpool",
 		},
 		InitGenesisOrder: []string{
-			testutil.AccountsModuleName,
-			testutil.AuthModuleName,
-			testutil.BankModuleName,
-			testutil.DistributionModuleName,
-			testutil.StakingModuleName,
-			testutil.SlashingModuleName,
-			testutil.GovModuleName,
-			testutil.MintModuleName,
+			"auth",
+			"bank",
+			"distribution",
+			"staking",
+			"slashing",
+			"gov",
+			"mint",
 			"genutil",
-			testutil.EvidenceModuleName,
-			testutil.AuthzModuleName,
-			testutil.FeegrantModuleName,
-			testutil.NFTModuleName,
-			testutil.GroupModuleName,
+			"evidence",
+			"authz",
+			"feegrant",
+			"nft",
+			"group",
+			"params",
 			"consensus",
-			testutil.UpgradeModuleName,
+			"upgrade",
 			"vesting",
-			testutil.CircuitModuleName,
-			testutil.ProtocolPoolModuleName,
-			testutil.EpochsModuleName,
+			"circuit",
+			"protocolpool",
 		},
 		setInitGenesis: true,
 	}
@@ -142,8 +138,8 @@ func WithCustomInitGenesisOrder(initGenesisOrder ...string) ModuleOption {
 
 func BankModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.BankModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.BankModuleName,
+		config.ModuleConfigs["bank"] = &appv1alpha1.ModuleConfig{
+			Name:   "bank",
 			Config: appconfig.WrapAny(&bankmodulev1.Module{}),
 		}
 	}
@@ -151,21 +147,20 @@ func BankModule() ModuleOption {
 
 func AuthModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.AuthModuleName] = &appv1alpha1.ModuleConfig{
-			Name: testutil.AuthModuleName,
+		config.ModuleConfigs["auth"] = &appv1alpha1.ModuleConfig{
+			Name: "auth",
 			Config: appconfig.WrapAny(&authmodulev1.Module{
 				Bech32Prefix: "cosmos",
 				ModuleAccountPermissions: []*authmodulev1.ModuleAccountPermission{
 					{Account: "fee_collector"},
-					{Account: testutil.DistributionModuleName},
-					{Account: testutil.MintModuleName, Permissions: []string{"minter"}},
-					{Account: "bonded_tokens_pool", Permissions: []string{"burner", testutil.StakingModuleName}},
-					{Account: "not_bonded_tokens_pool", Permissions: []string{"burner", testutil.StakingModuleName}},
-					{Account: testutil.GovModuleName, Permissions: []string{"burner"}},
-					{Account: testutil.NFTModuleName},
-					{Account: testutil.ProtocolPoolModuleName},
-					{Account: "stream_acc"},
-					{Account: "protocolpool_distr"},
+					{Account: "distribution"},
+					{Account: "mint", Permissions: []string{"minter"}},
+					{Account: "bonded_tokens_pool", Permissions: []string{"burner", "staking"}},
+					{Account: "not_bonded_tokens_pool", Permissions: []string{"burner", "staking"}},
+					{Account: "gov", Permissions: []string{"burner"}},
+					{Account: "nft"},
+					{Account: protocolpooltypes.ModuleName},
+					{Account: protocolpooltypes.ProtocolPoolEscrowAccount},
 				},
 			}),
 		}
@@ -174,8 +169,8 @@ func AuthModule() ModuleOption {
 
 func ParamsModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.ParamsModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.ParamsModuleName,
+		config.ModuleConfigs["params"] = &appv1alpha1.ModuleConfig{
+			Name:   "params",
 			Config: appconfig.WrapAny(&paramsmodulev1.Module{}),
 		}
 	}
@@ -183,8 +178,8 @@ func ParamsModule() ModuleOption {
 
 func TxModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.TxModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.TxModuleName,
+		config.ModuleConfigs["tx"] = &appv1alpha1.ModuleConfig{
+			Name:   "tx",
 			Config: appconfig.WrapAny(&txconfigv1.Config{}),
 		}
 	}
@@ -192,8 +187,8 @@ func TxModule() ModuleOption {
 
 func StakingModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.StakingModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.StakingModuleName,
+		config.ModuleConfigs["staking"] = &appv1alpha1.ModuleConfig{
+			Name:   "staking",
 			Config: appconfig.WrapAny(&stakingmodulev1.Module{}),
 		}
 	}
@@ -201,8 +196,8 @@ func StakingModule() ModuleOption {
 
 func SlashingModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.SlashingModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.SlashingModuleName,
+		config.ModuleConfigs["slashing"] = &appv1alpha1.ModuleConfig{
+			Name:   "slashing",
 			Config: appconfig.WrapAny(&slashingmodulev1.Module{}),
 		}
 	}
@@ -219,8 +214,8 @@ func GenutilModule() ModuleOption {
 
 func DistributionModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.DistributionModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.DistributionModuleName,
+		config.ModuleConfigs["distribution"] = &appv1alpha1.ModuleConfig{
+			Name:   "distribution",
 			Config: appconfig.WrapAny(&distrmodulev1.Module{}),
 		}
 	}
@@ -228,8 +223,8 @@ func DistributionModule() ModuleOption {
 
 func FeegrantModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.FeegrantModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.FeegrantModuleName,
+		config.ModuleConfigs["feegrant"] = &appv1alpha1.ModuleConfig{
+			Name:   "feegrant",
 			Config: appconfig.WrapAny(&feegrantmodulev1.Module{}),
 		}
 	}
@@ -246,8 +241,8 @@ func VestingModule() ModuleOption {
 
 func GovModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.GovModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.GovModuleName,
+		config.ModuleConfigs["gov"] = &appv1alpha1.ModuleConfig{
+			Name:   "gov",
 			Config: appconfig.WrapAny(&govmodulev1.Module{}),
 		}
 	}
@@ -264,13 +259,13 @@ func ConsensusModule() ModuleOption {
 
 func MintModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.MintModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.MintModuleName,
+		config.ModuleConfigs["mint"] = &appv1alpha1.ModuleConfig{
+			Name:   "mint",
 			Config: appconfig.WrapAny(&mintmodulev1.Module{}),
 			GolangBindings: []*appv1alpha1.GolangBinding{
 				{
-					InterfaceType:  "cosmossdk.io/x/mint/types/types.StakingKeeper",
-					Implementation: "cosmossdk.io/x/staking/keeper/*keeper.Keeper",
+					InterfaceType:  "github.com/cosmos/cosmos-sdk/x/mint/types/types.StakingKeeper",
+					Implementation: "github.com/cosmos/cosmos-sdk/x/staking/keeper/*keeper.Keeper",
 				},
 			},
 		}
@@ -279,8 +274,8 @@ func MintModule() ModuleOption {
 
 func EvidenceModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.EvidenceModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.EvidenceModuleName,
+		config.ModuleConfigs["evidence"] = &appv1alpha1.ModuleConfig{
+			Name:   "evidence",
 			Config: appconfig.WrapAny(&evidencemodulev1.Module{}),
 		}
 	}
@@ -288,8 +283,8 @@ func EvidenceModule() ModuleOption {
 
 func AuthzModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.AuthzModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.AuthzModuleName,
+		config.ModuleConfigs["authz"] = &appv1alpha1.ModuleConfig{
+			Name:   "authz",
 			Config: appconfig.WrapAny(&authzmodulev1.Module{}),
 		}
 	}
@@ -297,8 +292,8 @@ func AuthzModule() ModuleOption {
 
 func GroupModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.GroupModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.GroupModuleName,
+		config.ModuleConfigs["group"] = &appv1alpha1.ModuleConfig{
+			Name:   "group",
 			Config: appconfig.WrapAny(&groupmodulev1.Module{}),
 		}
 	}
@@ -306,8 +301,8 @@ func GroupModule() ModuleOption {
 
 func NFTModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.NFTModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.NFTModuleName,
+		config.ModuleConfigs["nft"] = &appv1alpha1.ModuleConfig{
+			Name:   "nft",
 			Config: appconfig.WrapAny(&nftmodulev1.Module{}),
 		}
 	}
@@ -315,8 +310,8 @@ func NFTModule() ModuleOption {
 
 func CircuitModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.CircuitModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.CircuitModuleName,
+		config.ModuleConfigs["circuit"] = &appv1alpha1.ModuleConfig{
+			Name:   "circuit",
 			Config: appconfig.WrapAny(&circuitmodulev1.Module{}),
 		}
 	}
@@ -324,36 +319,9 @@ func CircuitModule() ModuleOption {
 
 func ProtocolPoolModule() ModuleOption {
 	return func(config *Config) {
-		config.ModuleConfigs[testutil.ProtocolPoolModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.ProtocolPoolModuleName,
-			Config: appconfig.WrapAny(&poolmodulev1.Module{}),
-		}
-	}
-}
-
-func AccountsModule() ModuleOption {
-	return func(config *Config) {
-		config.ModuleConfigs[testutil.AccountsModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.AccountsModuleName,
-			Config: appconfig.WrapAny(&accountsmodulev1.Module{}),
-		}
-	}
-}
-
-func CounterModule() ModuleOption {
-	return func(config *Config) {
-		config.ModuleConfigs["counter"] = &appv1alpha1.ModuleConfig{
-			Name:   "counter",
-			Config: appconfig.WrapAny(&countermodulev1.Module{}),
-		}
-	}
-}
-
-func EpochsModule() ModuleOption {
-	return func(config *Config) {
-		config.ModuleConfigs[testutil.EpochsModuleName] = &appv1alpha1.ModuleConfig{
-			Name:   testutil.EpochsModuleName,
-			Config: appconfig.WrapAny(&epochsmodulev1.Module{}),
+		config.ModuleConfigs[protocolpooltypes.ModuleName] = &appv1alpha1.ModuleConfig{
+			Name:   protocolpooltypes.ModuleName,
+			Config: appconfig.WrapAny(&protocolpoolmodulev1.Module{}),
 		}
 	}
 }
@@ -400,8 +368,8 @@ func NewAppConfig(opts ...ModuleOption) depinject.Config {
 		}
 	}
 
-	if _, ok := cfg.ModuleConfigs[testutil.AuthModuleName]; ok {
-		overrides = append(overrides, &runtimev1alpha1.StoreKeyConfig{ModuleName: testutil.AuthModuleName, KvStoreKey: "acc"})
+	if _, ok := cfg.ModuleConfigs["auth"]; ok {
+		overrides = append(overrides, &runtimev1alpha1.StoreKeyConfig{ModuleName: "auth", KvStoreKey: "acc"})
 	}
 
 	runtimeConfig := &runtimev1alpha1.Module{

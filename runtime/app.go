@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"slices"
 
-	abci "github.com/cometbft/cometbft/api/cometbft/abci/v1"
-	"google.golang.org/grpc"
+	abci "github.com/cometbft/cometbft/abci/types"
 
 	runtimev1alpha1 "cosmossdk.io/api/cosmos/app/runtime/v1alpha1"
+	appv1alpha1 "cosmossdk.io/api/cosmos/app/v1alpha1"
 	"cosmossdk.io/core/appmodule"
-	"cosmossdk.io/core/legacy"
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	storetypes "cosmossdk.io/store/types"
-	authtx "cosmossdk.io/x/auth/tx"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -27,6 +25,7 @@ import (
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	authtx "github.com/cosmos/cosmos-sdk/x/auth/tx"
 )
 
 // App is a wrapper around BaseApp and ModuleManager that can be used in hybrid
@@ -41,16 +40,19 @@ import (
 type App struct {
 	*baseapp.BaseApp
 
-	ModuleManager     *module.Manager
-	configurator      module.Configurator // nolint:staticcheck // SA1019: Configurator is deprecated but still used in runtime v1.
+	ModuleManager *module.Manager
+
+	configurator      module.Configurator
 	config            *runtimev1alpha1.Module
 	storeKeys         []storetypes.StoreKey
 	interfaceRegistry codectypes.InterfaceRegistry
 	cdc               codec.Codec
-	amino             legacy.Amino
+	amino             *codec.LegacyAmino
+	basicManager      module.BasicManager
 	baseAppOptions    []BaseAppOption
 	msgServiceRouter  *baseapp.MsgServiceRouter
 	grpcQueryRouter   *baseapp.GRPCQueryRouter
+	appConfig         *appv1alpha1.Config
 	logger            log.Logger
 	// initChainer is the init chainer function defined by the app config.
 	// this is only required if the chain wants to add special InitChainer logic.
@@ -60,26 +62,26 @@ type App struct {
 // RegisterModules registers the provided modules with the module manager and
 // the basic module manager. This is the primary hook for integrating with
 // modules which are not registered using the app config.
-func (a *App) RegisterModules(modules ...module.AppModule) error {
+func (a *App) RegisterModules(modules ...module.AppModule) error { //nolint:staticcheck // needed for legacy compatibility
 	for _, appModule := range modules {
 		name := appModule.Name()
 		if _, ok := a.ModuleManager.Modules[name]; ok {
 			return fmt.Errorf("AppModule named %q already exists", name)
 		}
 
+		if _, ok := a.basicManager[name]; ok {
+			return fmt.Errorf("AppModuleBasic named %q already exists", name)
+		}
+
 		a.ModuleManager.Modules[name] = appModule
-		if mod, ok := appModule.(appmodule.HasRegisterInterfaces); ok {
-			mod.RegisterInterfaces(a.interfaceRegistry)
-		}
+		a.basicManager[name] = appModule
+		appModule.RegisterInterfaces(a.interfaceRegistry)
+		appModule.RegisterLegacyAminoCodec(a.amino)
 
-		if mod, ok := appModule.(module.HasAminoCodec); ok {
-			mod.RegisterLegacyAminoCodec(a.amino)
-		}
-
-		if mod, ok := appModule.(module.HasServices); ok {
-			mod.RegisterServices(a.configurator)
-		} else if module, ok := appModule.(hasServicesV1); ok {
-			if err := module.RegisterServices(a.configurator); err != nil {
+		if module, ok := appModule.(module.HasServices); ok {
+			module.RegisterServices(a.configurator)
+		} else if innerMod, ok := appModule.(appmodule.HasServices); ok {
+			if err := innerMod.RegisterServices(a.configurator); err != nil {
 				return err
 			}
 		}
@@ -155,7 +157,7 @@ func (a *App) Load(loadLatest bool) error {
 }
 
 // PreBlocker application updates every pre block
-func (a *App) PreBlocker(ctx sdk.Context, _ *abci.FinalizeBlockRequest) error {
+func (a *App) PreBlocker(ctx sdk.Context, _ *abci.RequestFinalizeBlock) (*sdk.ResponsePreBlock, error) {
 	return a.ModuleManager.PreBlock(ctx)
 }
 
@@ -171,27 +173,21 @@ func (a *App) EndBlocker(ctx sdk.Context) (sdk.EndBlock, error) {
 
 // Precommiter application updates every commit
 func (a *App) Precommiter(ctx sdk.Context) {
-	err := a.ModuleManager.Precommit(ctx)
-	if err != nil {
-		panic(err)
-	}
+	_ = a.ModuleManager.Precommit(ctx)
 }
 
 // PrepareCheckStater application updates every commit
 func (a *App) PrepareCheckStater(ctx sdk.Context) {
-	err := a.ModuleManager.PrepareCheckState(ctx)
-	if err != nil {
-		panic(err)
-	}
+	_ = a.ModuleManager.PrepareCheckState(ctx)
 }
 
 // InitChainer initializes the chain.
-func (a *App) InitChainer(ctx sdk.Context, req *abci.InitChainRequest) (*abci.InitChainResponse, error) {
+func (a *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
 	var genesisState map[string]json.RawMessage
 	if err := json.Unmarshal(req.AppStateBytes, &genesisState); err != nil {
-		return nil, err
+		panic(err)
 	}
-	return a.ModuleManager.InitGenesis(ctx, genesisState)
+	return a.ModuleManager.InitGenesis(ctx, a.cdc, genesisState)
 }
 
 // RegisterAPIRoutes registers all application module routes with the provided
@@ -208,7 +204,7 @@ func (a *App) RegisterAPIRoutes(apiSvr *api.Server, _ config.APIConfig) {
 	nodeservice.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
 
 	// Register grpc-gateway routes for all modules.
-	a.ModuleManager.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
+	a.basicManager.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
 }
 
 // RegisterTxService implements the Application.RegisterTxService method.
@@ -229,11 +225,13 @@ func (a *App) RegisterTendermintService(clientCtx client.Context) {
 
 // RegisterNodeService registers the node gRPC service on the app gRPC router.
 func (a *App) RegisterNodeService(clientCtx client.Context, cfg config.Config) {
-	nodeservice.RegisterNodeService(clientCtx, a.GRPCQueryRouter(), cfg)
+	nodeservice.RegisterNodeService(clientCtx, a.GRPCQueryRouter(), cfg, func() int64 {
+		return a.CommitMultiStore().EarliestVersion()
+	})
 }
 
 // Configurator returns the app's configurator.
-func (a *App) Configurator() module.Configurator { // nolint:staticcheck // SA1019: Configurator is deprecated but still used in runtime v1.
+func (a *App) Configurator() module.Configurator {
 	return a.configurator
 }
 
@@ -242,9 +240,9 @@ func (a *App) LoadHeight(height int64) error {
 	return a.LoadVersion(height)
 }
 
-// DefaultGenesis returns a default genesis from the registered AppModule's.
+// DefaultGenesis returns a default genesis from the registered AppModuleBasic's.
 func (a *App) DefaultGenesis() map[string]json.RawMessage {
-	return a.ModuleManager.DefaultGenesis()
+	return a.basicManager.DefaultGenesis(a.cdc)
 }
 
 // GetStoreKeys returns all the stored store keys.
@@ -272,9 +270,3 @@ func (a *App) UnsafeFindStoreKey(storeKey string) storetypes.StoreKey {
 }
 
 var _ servertypes.Application = &App{}
-
-// hasServicesV1 is the interface for registering service in baseapp Cosmos SDK.
-// This API is part of core/appmodule but commented out for dependencies.
-type hasServicesV1 interface {
-	RegisterServices(grpc.ServiceRegistrar) error
-}

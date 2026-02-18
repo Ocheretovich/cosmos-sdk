@@ -6,18 +6,20 @@ import (
 	"math/rand"
 
 	"cosmossdk.io/math"
-	"cosmossdk.io/x/staking/keeper"
-	"cosmossdk.io/x/staking/types"
 
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
 	"github.com/cosmos/cosmos-sdk/x/simulation"
+	"github.com/cosmos/cosmos-sdk/x/staking/keeper"
+	"github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 // Simulation operation weights constants
+// will be removed in the future
 const (
 	DefaultWeightMsgCreateValidator           int = 100
 	DefaultWeightMsgEditValidator             int = 5
@@ -25,7 +27,6 @@ const (
 	DefaultWeightMsgUndelegate                int = 100
 	DefaultWeightMsgBeginRedelegate           int = 100
 	DefaultWeightMsgCancelUnbondingDelegation int = 100
-	DefaultWeightMsgRotateConsPubKey          int = 100
 
 	OpWeightMsgCreateValidator           = "op_weight_msg_create_validator"
 	OpWeightMsgEditValidator             = "op_weight_msg_edit_validator"
@@ -33,10 +34,10 @@ const (
 	OpWeightMsgUndelegate                = "op_weight_msg_undelegate"
 	OpWeightMsgBeginRedelegate           = "op_weight_msg_begin_redelegate"
 	OpWeightMsgCancelUnbondingDelegation = "op_weight_msg_cancel_unbonding_delegation"
-	OpWeightMsgRotateConsPubKey          = "op_weight_msg_rotate_cons_pubkey"
 )
 
 // WeightedOperations returns all the operations from the module with their respective weights
+// migrate to the msg factories instead, this method will be removed in the future
 func WeightedOperations(
 	appParams simtypes.AppParams,
 	cdc codec.JSONCodec,
@@ -52,7 +53,6 @@ func WeightedOperations(
 		weightMsgUndelegate                int
 		weightMsgBeginRedelegate           int
 		weightMsgCancelUnbondingDelegation int
-		weightMsgRotateConsPubKey          int
 	)
 
 	appParams.GetOrGenerate(OpWeightMsgCreateValidator, &weightMsgCreateValidator, nil, func(_ *rand.Rand) {
@@ -77,10 +77,6 @@ func WeightedOperations(
 
 	appParams.GetOrGenerate(OpWeightMsgCancelUnbondingDelegation, &weightMsgCancelUnbondingDelegation, nil, func(_ *rand.Rand) {
 		weightMsgCancelUnbondingDelegation = DefaultWeightMsgCancelUnbondingDelegation
-	})
-
-	appParams.GetOrGenerate(OpWeightMsgRotateConsPubKey, &weightMsgRotateConsPubKey, nil, func(_ *rand.Rand) {
-		weightMsgRotateConsPubKey = DefaultWeightMsgRotateConsPubKey
 	})
 
 	return simulation.WeightedOperations{
@@ -108,14 +104,11 @@ func WeightedOperations(
 			weightMsgCancelUnbondingDelegation,
 			SimulateMsgCancelUnbondingDelegate(txGen, ak, bk, k),
 		),
-		simulation.NewWeightedOperation(
-			weightMsgRotateConsPubKey,
-			SimulateMsgRotateConsPubKey(txGen, ak, bk, k),
-		),
 	}
 }
 
 // SimulateMsgCreateValidator generates a MsgCreateValidator with random values
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgCreateValidator(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
@@ -123,7 +116,7 @@ func SimulateMsgCreateValidator(
 	k *keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgCreateValidator{})
 
@@ -134,12 +127,6 @@ func SimulateMsgCreateValidator(
 		_, err := k.GetValidator(ctx, address)
 		if err == nil {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "validator already exists"), nil, nil
-		}
-
-		consPubKey := sdk.GetConsAddress(simAccount.ConsKey.PubKey())
-		_, err = k.GetValidatorByConsAddr(ctx, consPubKey)
-		if err == nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "cons key already used"), nil, nil
 		}
 
 		denom, err := k.BondDenom(ctx)
@@ -166,7 +153,7 @@ func SimulateMsgCreateValidator(
 
 		coins, hasNeg := spendable.SafeSub(selfDelegation)
 		if !hasNeg {
-			fees, err = simtypes.RandomFees(r, coins)
+			fees, err = simtypes.RandomFees(r, ctx, coins)
 			if err != nil {
 				return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to generate fees"), nil, err
 			}
@@ -187,25 +174,9 @@ func SimulateMsgCreateValidator(
 			simtypes.RandomDecAmount(r, maxCommission),
 		)
 
-		addr, err := k.ValidatorAddressCodec().BytesToString(address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to generate validator address"), nil, err
-		}
-
-		msg, err := types.NewMsgCreateValidator(addr, simAccount.ConsKey.PubKey(), selfDelegation, description, commission, math.OneInt())
+		msg, err := types.NewMsgCreateValidator(address.String(), simAccount.ConsKey.PubKey(), selfDelegation, description, commission, math.OneInt())
 		if err != nil {
 			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "unable to create CreateValidator message"), nil, err
-		}
-
-		// check if there's another key rotation for this same key in the same block
-		allRotations, err := k.GetBlockConsPubKeyRotationHistory(ctx)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "cannot get block cons key rotation history"), nil, err
-		}
-		for _, r := range allRotations {
-			if r.NewConsPubkey.Compare(msg.Pubkey) == 0 {
-				return simtypes.NoOpMsg(types.ModuleName, msgType, "cons key already used in this block"), nil, nil
-			}
 		}
 
 		txCtx := simulation.OperationInput{
@@ -225,6 +196,7 @@ func SimulateMsgCreateValidator(
 }
 
 // SimulateMsgEditValidator generates a MsgEditValidator with random values
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgEditValidator(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
@@ -232,7 +204,7 @@ func SimulateMsgEditValidator(
 	k *keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgEditValidator{})
 
@@ -253,7 +225,7 @@ func SimulateMsgEditValidator(
 		address := val.GetOperator()
 		newCommissionRate := simtypes.RandomDecAmount(r, val.Commission.MaxRate)
 
-		if err := val.Commission.ValidateNewRate(newCommissionRate, ctx.HeaderInfo().Time); err != nil {
+		if err := val.Commission.ValidateNewRate(newCommissionRate, ctx.BlockHeader().Time); err != nil {
 			// skip as the commission is invalid
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "invalid commission rate"), nil, nil
 		}
@@ -300,6 +272,7 @@ func SimulateMsgEditValidator(
 }
 
 // SimulateMsgDelegate generates a MsgDelegate with random values
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgDelegate(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
@@ -307,7 +280,7 @@ func SimulateMsgDelegate(
 	k *keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgDelegate{})
 		denom, err := k.BondDenom(ctx)
@@ -331,7 +304,7 @@ func SimulateMsgDelegate(
 		}
 
 		if val.InvalidExRate() {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "validator's invalid echange rate"), nil, nil
+			return simtypes.NoOpMsg(types.ModuleName, msgType, "validator's invalid exchange rate"), nil, nil
 		}
 
 		amount := bk.GetBalance(ctx, simAccount.Address, denom).Amount
@@ -353,17 +326,13 @@ func SimulateMsgDelegate(
 
 		coins, hasNeg := spendable.SafeSub(bondAmt)
 		if !hasNeg {
-			fees, err = simtypes.RandomFees(r, coins)
+			fees, err = simtypes.RandomFees(r, ctx, coins)
 			if err != nil {
 				return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to generate fees"), nil, err
 			}
 		}
 
-		accAddr, err := ak.AddressCodec().BytesToString(simAccount.Address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "error getting account string address"), nil, err
-		}
-		msg := types.NewMsgDelegate(accAddr, val.GetOperator(), bondAmt)
+		msg := types.NewMsgDelegate(simAccount.Address.String(), val.GetOperator(), bondAmt)
 
 		txCtx := simulation.OperationInput{
 			R:             r,
@@ -382,6 +351,7 @@ func SimulateMsgDelegate(
 }
 
 // SimulateMsgUndelegate generates a MsgUndelegate with random values
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgUndelegate(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
@@ -389,7 +359,7 @@ func SimulateMsgUndelegate(
 	k *keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgUndelegate{})
 
@@ -461,10 +431,6 @@ func SimulateMsgUndelegate(
 			delAddr, val.GetOperator(), sdk.NewCoin(bondDenom, unbondAmt),
 		)
 
-		if !bk.IsSendEnabledDenom(ctx, bondDenom) {
-			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "bond denom send not enabled"), nil, nil
-		}
-
 		// need to retrieve the simulation account associated with delegation to retrieve PrivKey
 		var simAccount simtypes.Account
 
@@ -501,6 +467,7 @@ func SimulateMsgUndelegate(
 }
 
 // SimulateMsgCancelUnbondingDelegate generates a MsgCancelUnbondingDelegate with random values
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgCancelUnbondingDelegate(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
@@ -508,7 +475,7 @@ func SimulateMsgCancelUnbondingDelegate(
 	k *keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgCancelUnbondingDelegation{})
 
@@ -557,7 +524,7 @@ func SimulateMsgCancelUnbondingDelegate(
 			}
 		}
 
-		if unbondingDelegationEntry.CompletionTime.Before(ctx.HeaderInfo().Time) {
+		if unbondingDelegationEntry.CompletionTime.Before(ctx.BlockTime()) {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "unbonding delegation is already processed"), nil, nil
 		}
 
@@ -576,12 +543,8 @@ func SimulateMsgCancelUnbondingDelegate(
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "bond denom not found"), nil, err
 		}
 
-		accAddr, err := ak.AddressCodec().BytesToString(simAccount.Address)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "error getting account string address"), nil, err
-		}
 		msg := types.NewMsgCancelUnbondingDelegation(
-			accAddr, val.GetOperator(), unbondingDelegationEntry.CreationHeight, sdk.NewCoin(bondDenom, cancelBondAmt),
+			simAccount.Address.String(), val.GetOperator(), unbondingDelegationEntry.CreationHeight, sdk.NewCoin(bondDenom, cancelBondAmt),
 		)
 
 		spendable := bk.SpendableCoins(ctx, simAccount.Address)
@@ -605,6 +568,7 @@ func SimulateMsgCancelUnbondingDelegate(
 }
 
 // SimulateMsgBeginRedelegate generates a MsgBeginRedelegate with random values
+// migrate to the msg factories instead, this method will be removed in the future
 func SimulateMsgBeginRedelegate(
 	txGen client.TxConfig,
 	ak types.AccountKeeper,
@@ -612,7 +576,7 @@ func SimulateMsgBeginRedelegate(
 	k *keeper.Keeper,
 ) simtypes.Operation {
 	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
+		r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		msgType := sdk.MsgTypeURL(&types.MsgBeginRedelegate{})
 
@@ -658,7 +622,7 @@ func SimulateMsgBeginRedelegate(
 		}
 
 		if hasRecRedel {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "receveing redelegation is not allowed"), nil, nil // skip
+			return simtypes.NoOpMsg(types.ModuleName, msgType, "receiving redelegation is not allowed"), nil, nil // skip
 		}
 
 		// get random destination validator
@@ -692,6 +656,9 @@ func SimulateMsgBeginRedelegate(
 
 		if redAmt.IsZero() {
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "amount is zero"), nil, nil
+		}
+		if totalBond.Sub(redAmt).IsZero() {
+			return simtypes.NoOpMsg(types.ModuleName, msgType, "can not redelegate all"), nil, nil
 		}
 
 		// check if the shares truncate to zero
@@ -727,132 +694,10 @@ func SimulateMsgBeginRedelegate(
 			return simtypes.NoOpMsg(types.ModuleName, msgType, "bond denom not found"), nil, err
 		}
 
-		if !bk.IsSendEnabledDenom(ctx, bondDenom) {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "bond denom send not enabled"), nil, nil
-		}
-
 		msg := types.NewMsgBeginRedelegate(
 			delAddr, srcVal.GetOperator(), destVal.GetOperator(),
 			sdk.NewCoin(bondDenom, redAmt),
 		)
-
-		txCtx := simulation.OperationInput{
-			R:               r,
-			App:             app,
-			TxGen:           txGen,
-			Cdc:             nil,
-			Msg:             msg,
-			Context:         ctx,
-			SimAccount:      simAccount,
-			AccountKeeper:   ak,
-			Bankkeeper:      bk,
-			ModuleName:      types.ModuleName,
-			CoinsSpentInMsg: spendable,
-		}
-
-		return simulation.GenAndDeliverTxWithRandFees(txCtx)
-	}
-}
-
-func SimulateMsgRotateConsPubKey(txGen client.TxConfig, ak types.AccountKeeper, bk types.BankKeeper, k *keeper.Keeper) simtypes.Operation {
-	return func(
-		r *rand.Rand, app simtypes.AppEntrypoint, ctx sdk.Context, accs []simtypes.Account, chainID string,
-	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
-		msgType := sdk.MsgTypeURL(&types.MsgRotateConsPubKey{})
-
-		vals, err := k.GetAllValidators(ctx)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to get validators"), nil, err
-		}
-
-		if len(vals) == 0 {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "number of validators equal zero"), nil, nil
-		}
-
-		val, ok := testutil.RandSliceElem(r, vals)
-		if !ok {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to pick a validator"), nil, nil
-		}
-
-		if val.Status != types.Bonded || val.ConsensusPower(sdk.DefaultPowerReduction) == 0 {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "validator not bonded."), nil, nil
-		}
-
-		valAddr := val.GetOperator()
-		valBytes, err := k.ValidatorAddressCodec().StringToBytes(valAddr)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "error getting validator address bytes"), nil, err
-		}
-
-		simAccount, found := simtypes.FindAccount(accs, sdk.AccAddress(valBytes))
-		if !found {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to find account"), nil, fmt.Errorf("validator %s not found", val.GetOperator())
-		}
-
-		cons, err := val.GetConsAddr()
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "cannot get conskey"), nil, err
-		}
-		consAddress, err := k.ConsensusAddressCodec().BytesToString(cons)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "error getting consensus address"), nil, err
-		}
-
-		acc, _ := simtypes.RandomAcc(r, accs)
-		accAddress, err := k.ConsensusAddressCodec().BytesToString(acc.ConsKey.PubKey().Address())
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "error getting consensus address"), nil, err
-		}
-		if consAddress == accAddress {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "new pubkey and current pubkey should be different"), nil, nil
-		}
-
-		account := ak.GetAccount(ctx, simAccount.Address)
-		if account == nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to find account"), nil, nil
-		}
-
-		spendable := bk.SpendableCoins(ctx, account.GetAddress())
-		params, err := k.Params.Get(ctx)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "cannot get params"), nil, err
-		}
-
-		if !spendable.IsAllGTE(sdk.NewCoins(params.KeyRotationFee)) {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "not enough balance to pay fee"), nil, nil
-		}
-
-		if err := k.ExceedsMaxRotations(ctx, valBytes); err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "rotations limit reached within unbonding period"), nil, nil
-		}
-
-		_, err = k.GetValidatorByConsAddr(ctx, cons)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "cannot get validator"), nil, err
-		}
-
-		// check whether the new cons key associated with another validator
-		newConsAddr := sdk.ConsAddress(acc.ConsKey.PubKey().Address())
-		_, err = k.GetValidatorByConsAddr(ctx, newConsAddr)
-		if err == nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "cons key already used"), nil, nil
-		}
-
-		msg, err := types.NewMsgRotateConsPubKey(valAddr, acc.ConsKey.PubKey())
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "unable to build msg"), nil, err
-		}
-
-		// check if there's another key rotation for this same key in the same block
-		allRotations, err := k.GetBlockConsPubKeyRotationHistory(ctx)
-		if err != nil {
-			return simtypes.NoOpMsg(types.ModuleName, msgType, "cannot get block cons key rotation history"), nil, err
-		}
-		for _, r := range allRotations {
-			if r.NewConsPubkey.Compare(msg.NewPubkey) == 0 {
-				return simtypes.NoOpMsg(types.ModuleName, msgType, "cons key already used in this block"), nil, nil
-			}
-		}
 
 		txCtx := simulation.OperationInput{
 			R:               r,

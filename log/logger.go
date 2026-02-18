@@ -1,27 +1,30 @@
 package log
 
 import (
+	"context"
 	"encoding"
 	"encoding/json"
 	"fmt"
 	"io"
 
+	"github.com/bytedance/sonic"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/pkgerrors"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func init() {
 	zerolog.InterfaceMarshalFunc = func(i any) ([]byte, error) {
 		switch v := i.(type) {
 		case json.Marshaler:
-			return json.Marshal(i)
+			return sonic.Marshal(i)
 		case encoding.TextMarshaler:
-			return json.Marshal(i)
+			return sonic.Marshal(i)
 		case fmt.Stringer:
-			return json.Marshal(v.String())
+			return sonic.Marshal(v.String())
 		default:
-			return json.Marshal(i)
+			return sonic.Marshal(i)
 		}
 	}
 }
@@ -35,24 +38,34 @@ var ContextKey contextKey
 type contextKey struct{}
 
 // Logger is the Cosmos SDK logger interface.
-// It extends cosmossdk.io/core/log.Logger to return a child logger.
-// Use cosmossdk.io/core/log.Logger instead in modules.
 type Logger interface {
 	// Info takes a message and a set of key/value pairs and logs with level INFO.
 	// The key of the tuple must be a string.
 	Info(msg string, keyVals ...any)
 
+	// InfoContext is like Info but extracts trace context from ctx for correlation.
+	InfoContext(ctx context.Context, msg string, keyVals ...any)
+
 	// Warn takes a message and a set of key/value pairs and logs with level WARN.
 	// The key of the tuple must be a string.
 	Warn(msg string, keyVals ...any)
+
+	// WarnContext is like Warn but extracts trace context from ctx for correlation.
+	WarnContext(ctx context.Context, msg string, keyVals ...any)
 
 	// Error takes a message and a set of key/value pairs and logs with level ERR.
 	// The key of the tuple must be a string.
 	Error(msg string, keyVals ...any)
 
+	// ErrorContext is like Error but extracts trace context from ctx for correlation.
+	ErrorContext(ctx context.Context, msg string, keyVals ...any)
+
 	// Debug takes a message and a set of key/value pairs and logs with level DEBUG.
 	// The key of the tuple must be a string.
 	Debug(msg string, keyVals ...any)
+
+	// DebugContext is like Debug but extracts trace context from ctx for correlation.
+	DebugContext(ctx context.Context, msg string, keyVals ...any)
 
 	// With returns a new wrapped logger with additional context provided by a set.
 	With(keyVals ...any) Logger
@@ -61,6 +74,15 @@ type Logger interface {
 	// It is used to access the full functionalities of the underlying logger.
 	// Advanced users can type cast the returned value to the actual logger.
 	Impl() any
+}
+
+// VerboseModeLogger is an extension interface of Logger which allows verbosity to be configured.
+type VerboseModeLogger interface {
+	Logger
+	// SetVerboseMode configures whether the logger enters verbose mode or not for
+	// special operations where increased observability of log messages is desired
+	// (such as chain upgrades).
+	SetVerboseMode(bool)
 }
 
 // WithJSONMarshal configures zerolog global json encoding.
@@ -81,6 +103,11 @@ func WithJSONMarshal(marshaler func(v any) ([]byte, error)) {
 
 type zeroLogWrapper struct {
 	*zerolog.Logger
+	regularLevel zerolog.Level
+	verboseLevel zerolog.Level
+	// this field is used to disable filtering during verbose logging
+	// and will only be non-nil when we have a filterWriter
+	filterWriter *filterWriter
 }
 
 // NewLogger returns a new logger that writes to the given destination.
@@ -91,7 +118,6 @@ type zeroLogWrapper struct {
 //
 // Stderr is the typical destination for logs,
 // so that any output from your application can still be piped to other processes.
-// The returned value can be safely cast to cosmossdk.io/core/log.Logger.
 func NewLogger(dst io.Writer, options ...Option) Logger {
 	logCfg := defaultConfig
 	for _, opt := range options {
@@ -107,11 +133,17 @@ func NewLogger(dst io.Writer, options ...Option) Logger {
 		}
 	}
 
+	var fltWtr *filterWriter
 	if logCfg.Filter != nil {
-		output = NewFilterWriter(output, logCfg.Filter)
+		fltWtr = &filterWriter{
+			parent: output,
+			filter: logCfg.Filter,
+		}
+		output = fltWtr
 	}
 
 	logger := zerolog.New(output)
+
 	if logCfg.StackTrace {
 		zerolog.ErrorStackMarshaler = func(err error) interface{} {
 			return pkgerrors.MarshalStack(errors.WithStack(err))
@@ -124,18 +156,25 @@ func NewLogger(dst io.Writer, options ...Option) Logger {
 		logger = logger.With().Timestamp().Logger()
 	}
 
-	if logCfg.Level != zerolog.NoLevel {
-		logger = logger.Level(logCfg.Level)
-	}
-
+	logger = logger.Level(logCfg.Level)
 	logger = logger.Hook(logCfg.Hooks...)
 
-	return zeroLogWrapper{&logger}
+	return zeroLogWrapper{
+		Logger:       &logger,
+		regularLevel: logCfg.Level,
+		verboseLevel: logCfg.VerboseLevel,
+		filterWriter: fltWtr,
+	}
 }
 
 // NewCustomLogger returns a new logger with the given zerolog logger.
 func NewCustomLogger(logger zerolog.Logger) Logger {
-	return zeroLogWrapper{&logger}
+	return zeroLogWrapper{
+		Logger:       &logger,
+		regularLevel: logger.GetLevel(),
+		verboseLevel: zerolog.NoLevel,
+		filterWriter: nil,
+	}
 }
 
 // Info takes a message and a set of key/value pairs and logs with level INFO.
@@ -162,23 +201,81 @@ func (l zeroLogWrapper) Debug(msg string, keyVals ...interface{}) {
 	l.Logger.Debug().Fields(keyVals).Msg(msg)
 }
 
+// InfoContext is like Info but extracts trace context from ctx for correlation.
+func (l zeroLogWrapper) InfoContext(ctx context.Context, msg string, keyVals ...interface{}) {
+	l.withSpanContext(ctx).Info().Fields(keyVals).Msg(msg)
+}
+
+// WarnContext is like Warn but extracts trace context from ctx for correlation.
+func (l zeroLogWrapper) WarnContext(ctx context.Context, msg string, keyVals ...interface{}) {
+	l.withSpanContext(ctx).Warn().Fields(keyVals).Msg(msg)
+}
+
+// ErrorContext is like Error but extracts trace context from ctx for correlation.
+func (l zeroLogWrapper) ErrorContext(ctx context.Context, msg string, keyVals ...interface{}) {
+	l.withSpanContext(ctx).Error().Fields(keyVals).Msg(msg)
+}
+
+// DebugContext is like Debug but extracts trace context from ctx for correlation.
+func (l zeroLogWrapper) DebugContext(ctx context.Context, msg string, keyVals ...interface{}) {
+	l.withSpanContext(ctx).Debug().Fields(keyVals).Msg(msg)
+}
+
 // With returns a new wrapped logger with additional context provided by a set.
 func (l zeroLogWrapper) With(keyVals ...interface{}) Logger {
 	logger := l.Logger.With().Fields(keyVals).Logger()
-	return zeroLogWrapper{&logger}
+	l.Logger = &logger
+	return l
 }
 
 // WithContext returns a new wrapped logger with additional context provided by a set.
 func (l zeroLogWrapper) WithContext(keyVals ...interface{}) any {
 	logger := l.Logger.With().Fields(keyVals).Logger()
-	return zeroLogWrapper{&logger}
+	l.Logger = &logger
+	return l
+}
+
+// withSpanContext extracts the span context from ctx, and returns a zerolog logger with trace/span id fields.
+func (l zeroLogWrapper) withSpanContext(ctx context.Context) *zerolog.Logger {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return l.Logger
+	}
+
+	w := l.Logger.With().
+		Str("trace_id", sc.TraceID().String()).
+		Str("span_id", sc.SpanID().String())
+
+	if tf := sc.TraceFlags(); tf != 0 {
+		w = w.Str("trace_flags", tf.String())
+	}
+
+	derived := w.Logger()
+	return &derived
 }
 
 // Impl returns the underlying zerolog logger.
-// It can be used to used zerolog structured API directly instead of the wrapper.
+// It can be used to use zerolog structured API directly instead of the wrapper.
 func (l zeroLogWrapper) Impl() interface{} {
 	return l.Logger
 }
+
+// SetVerboseMode implements VerboseModeLogger interface.
+func (l zeroLogWrapper) SetVerboseMode(enable bool) {
+	if enable && l.verboseLevel != zerolog.NoLevel {
+		*l.Logger = l.Level(l.verboseLevel)
+		if l.filterWriter != nil {
+			l.filterWriter.disableFilter = true
+		}
+	} else {
+		*l.Logger = l.Level(l.regularLevel)
+		if l.filterWriter != nil {
+			l.filterWriter.disableFilter = false
+		}
+	}
+}
+
+var _ VerboseModeLogger = zeroLogWrapper{}
 
 // NewNopLogger returns a new logger that does nothing.
 func NewNopLogger() Logger {
@@ -191,10 +288,14 @@ func NewNopLogger() Logger {
 // The custom implementation is about 3x faster.
 type nopLogger struct{}
 
-func (nopLogger) Info(string, ...any)    {}
-func (nopLogger) Warn(string, ...any)    {}
-func (nopLogger) Error(string, ...any)   {}
-func (nopLogger) Debug(string, ...any)   {}
-func (nopLogger) With(...any) Logger     { return nopLogger{} }
-func (nopLogger) WithContext(...any) any { return nopLogger{} }
-func (nopLogger) Impl() any              { return nopLogger{} }
+func (nopLogger) Info(string, ...any)                          {}
+func (nopLogger) InfoContext(context.Context, string, ...any)  {}
+func (nopLogger) Warn(string, ...any)                          {}
+func (nopLogger) WarnContext(context.Context, string, ...any)  {}
+func (nopLogger) Error(string, ...any)                         {}
+func (nopLogger) ErrorContext(context.Context, string, ...any) {}
+func (nopLogger) Debug(string, ...any)                         {}
+func (nopLogger) DebugContext(context.Context, string, ...any) {}
+func (nopLogger) With(...any) Logger                           { return nopLogger{} }
+func (nopLogger) WithContext(...any) any                       { return nopLogger{} }
+func (nopLogger) Impl() any                                    { return nopLogger{} }

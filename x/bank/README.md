@@ -193,7 +193,8 @@ Restricted permission to mint per module could be achieved by using baseKeeper w
 // between accounts.
 type Keeper interface {
     SendKeeper
-    WithMintCoinsRestriction(MintingRestrictionFn) BaseKeeper
+    WithMintCoinsRestriction(types.MintingRestrictionFn) BaseKeeper
+    WithObjStoreKey(storetypes.StoreKey) BaseKeeper
 
     InitGenesis(context.Context, *types.GenesisState)
     ExportGenesis(context.Context) *types.GenesisState
@@ -205,6 +206,7 @@ type Keeper interface {
     GetDenomMetaData(ctx context.Context, denom string) (types.Metadata, bool)
     HasDenomMetaData(ctx context.Context, denom string) bool
     SetDenomMetaData(ctx context.Context, denomMetaData types.Metadata)
+    GetAllDenomMetaData(ctx context.Context) []types.Metadata
     IterateAllDenomMetaData(ctx context.Context, cb func(types.Metadata) bool)
 
     SendCoinsFromModuleToAccount(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
@@ -215,11 +217,14 @@ type Keeper interface {
     MintCoins(ctx context.Context, moduleName string, amt sdk.Coins) error
     BurnCoins(ctx context.Context, moduleName string, amt sdk.Coins) error
 
+    SendCoinsFromAccountToModuleVirtual(ctx context.Context, senderAddr sdk.AccAddress, recipientModule string, amt sdk.Coins) error
+    SendCoinsFromModuleToAccountVirtual(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
+    CreditVirtualAccounts(ctx context.Context) error
+    SendCoinsFromVirtual(ctx context.Context, fromAddr, toAddr sdk.AccAddress, amt sdk.Coins) error
+    SendCoinsToVirtual(ctx context.Context, fromAddr, toAddr sdk.AccAddress, amt sdk.Coins) error
+
     DelegateCoins(ctx context.Context, delegatorAddr, moduleAccAddr sdk.AccAddress, amt sdk.Coins) error
     UndelegateCoins(ctx context.Context, moduleAccAddr, delegatorAddr sdk.AccAddress, amt sdk.Coins) error
-
-    // GetAuthority gets the address capable of executing governance proposal messages. Usually the gov module account.
-    GetAuthority() string
 
     types.QueryServer
 }
@@ -236,8 +241,8 @@ accounts. The send keeper does not alter the total supply (mint or burn coins).
 type SendKeeper interface {
     ViewKeeper
 
-    AppendSendRestriction(restriction SendRestrictionFn)
-    PrependSendRestriction(restriction SendRestrictionFn)
+    AppendSendRestriction(restriction types.SendRestrictionFn)
+    PrependSendRestriction(restriction types.SendRestrictionFn)
     ClearSendRestriction()
 
     InputOutputCoins(ctx context.Context, input types.Input, outputs []types.Output) error
@@ -247,9 +252,10 @@ type SendKeeper interface {
     SetParams(ctx context.Context, params types.Params) error
 
     IsSendEnabledDenom(ctx context.Context, denom string) bool
+    GetSendEnabledEntry(ctx context.Context, denom string) (types.SendEnabled, bool)
     SetSendEnabled(ctx context.Context, denom string, value bool)
     SetAllSendEnabled(ctx context.Context, sendEnableds []*types.SendEnabled)
-    DeleteSendEnabled(ctx context.Context, denom string)
+    DeleteSendEnabled(ctx context.Context, denoms ...string)
     IterateSendEnabledEntries(ctx context.Context, cb func(denom string, sendEnabled bool) (stop bool))
     GetAllSendEnabledEntries(ctx context.Context) []types.SendEnabled
 
@@ -257,6 +263,9 @@ type SendKeeper interface {
     IsSendEnabledCoins(ctx context.Context, coins ...sdk.Coin) error
 
     BlockedAddr(addr sdk.AccAddress) bool
+    GetBlockedAddresses() map[string]bool
+
+    GetAuthority() string
 }
 ```
 
@@ -420,25 +429,10 @@ https://github.com/cosmos/cosmos-sdk/blob/v0.47.0-rc1/proto/cosmos/bank/v1beta1/
 
 The message will fail under the following conditions:
 
-* The authority is not a decodable address.
+* The authority is not a bech32 address.
 * The authority is not x/gov module's address.
 * There are multiple SendEnabled entries with the same Denom.
 * One or more SendEnabled entries has an invalid Denom.
-
-### MsgBurn 
-
-Used to burn coins from an account. The coins are removed from the account and the total supply is reduced.
-
-```protobuf reference
-https://github.com/cosmos/cosmos-sdk/blob/1af000b3ef6296f9928caf494fe5bb812990f22d/proto/cosmos/bank/v1beta1/tx.proto#L131-L148
-```
-
-This message will fail under the following conditions:
-
-* The signer is not present
-* The coins are not spendable
-* The coins are not positive
-* The coins are not valid
 
 ## Events
 

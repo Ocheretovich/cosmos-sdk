@@ -37,8 +37,8 @@ It is possible to customize the generation of transactions and queries by defini
 Here are the steps to use AutoCLI:
 
 1. Ensure your app's modules implements the `appmodule.AppModule` interface.
-2. (optional) Configure how to behave as `autocli` command generation, by implementing the `func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions` method on the module.
-3. Use the `autocli.AppOptions` struct to specify the modules you defined. If you are using `depinject` / app v2, it can automatically create an instance of `autocli.AppOptions` based on your app's configuration.
+2. (optional) Configure how behave `autocli` command generation, by implementing the `func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions` method on the module.
+3. Use the `autocli.AppOptions` struct to specify the modules you defined. If you are using `depinject`, it can automatically create an instance of `autocli.AppOptions` based on your app's configuration.
 4. Use the `EnhanceRootCommand()` method provided by `autocli` to add the CLI commands for the specified modules to your root command.
 
 :::tip
@@ -92,7 +92,7 @@ The keyring is then converted to the `client/v2/autocli/keyring` interface.
 If no keyring is provided, the `autocli` generated command will not be able to sign transactions, but will still be able to query the chain.
 
 :::tip
-The Cosmos SDK keyring and Hubl keyring both implement the `client/v2/autocli/keyring` interface, thanks to the following wrapper:
+The Cosmos SDK keyring implements the `client/v2/autocli/keyring` interface, thanks to the following wrapper:
 
 ```go
 keyring.NewAutoCLIKeyring(kb)
@@ -159,7 +159,49 @@ Then the command can be used as follows, instead of having to specify the `--add
 <appd> query auth account cosmos1abcd...xyz
 ```
 
-### Customising Flag Names
+#### Flattened Fields in Positional Arguments
+
+AutoCLI also supports flattening nested message fields as positional arguments. This means you can access nested fields
+using dot notation in the `ProtoField` parameter. This is particularly useful when you want to directly set nested
+message fields as positional arguments.
+
+For example, if you have a nested message structure like this:
+
+```protobuf
+message Permissions {
+    string level = 1;
+    repeated string limit_type_urls = 2;
+}
+
+message MsgAuthorizeCircuitBreaker {
+    string grantee = 1;
+    Permissions permissions = 2;
+}
+```
+
+You can flatten the fields in your AutoCLI configuration:
+
+```go
+{
+    RpcMethod: "AuthorizeCircuitBreaker",
+    Use:       "authorize <grantee> <level> <msg_type_urls>",
+    PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+        {ProtoField: "grantee"},
+        {ProtoField: "permissions.level"},
+        {ProtoField: "permissions.limit_type_urls"},
+    },
+}
+```
+
+This allows users to provide values for nested fields directly as positional arguments:
+
+```bash
+<appd> tx circuit authorize cosmos1... super-admin "/cosmos.bank.v1beta1.MsgSend,/cosmos.bank.v1beta1.MsgMultiSend"
+```
+
+Instead of having to provide a complex JSON structure for nested fields, flattening makes the CLI more user-friendly by allowing direct access to nested fields.
+
+#### Customising Flag Names
 
 By default, `autocli` generates flag names based on the names of the fields in your protobuf message. However, you can customise the flag names by providing a `FlagOptions`. This parameter allows you to specify custom names for flags based on the names of the message fields.
 
@@ -186,7 +228,7 @@ In order to enable this behavior, set in `AutoCLIOptions()` the `EnhanceCustomCo
 https://github.com/cosmos/cosmos-sdk/blob/fa4d87ef7e6d87aaccc94c337ffd2fe90fcb7a9d/x/gov/autocli.go#L98
 ```
 
-If not set to true, `AutoCLI` will not generate commands for the module if there are already commands registered for the module (when `GetTxCmd()` or `GetQueryCmd()` are defined).
+If not set to true, `AutoCLI` will not generate commands for the module if there are already commands registered for the module (when `GetTxCmd()` or `GetTxCmd()` are defined).
 
 ### Skip a command
 
@@ -208,78 +250,9 @@ It is possible to use `AutoCLI` for non module commands. The trick is still to i
 For example, here is how the SDK does it for `cometbft` gRPC commands:
 
 ```go reference
-https://github.com/cosmos/cosmos-sdk/blob/main/client/grpc/cmtservice/autocli.go#L52-L71
+https://github.com/cosmos/cosmos-sdk/blob/client/v2.0.0-beta.1/client/grpc/cmtservice/autocli.go#L52-L71
 ```
 
 ## Summary
 
-`autocli` lets you generate CLI to your Cosmos SDK-based applications without any cobra boilerplate. It allows you to easily generate CLI commands and flags from your protobuf messages, and provides many options for customising the behavior of your CLI application.
-
-To further enhance your CLI experience with Cosmos SDK-based blockchains, you can use `hubl`. `hubl` is a tool that allows you to query any Cosmos SDK-based blockchain using the new AutoCLI feature of the Cosmos SDK. With `hubl`, you can easily configure a new chain and query modules with just a few simple commands.
-
-For more information on `hubl`, including how to configure a new chain and query a module, see the [Hubl documentation](https://docs.cosmos.network/main/tooling/hubl).
-
-# Off-Chain
-
-Off-chain functionalities allow you to sign and verify files with two commands:
-
-* `sign-file` for signing a file.
-* `verify-file` for verifying a previously signed file.
-
-Signing a file will result in a Tx with a `MsgSignArbitraryData` as described in the [Off-chain CIP](https://github.com/cosmos/cips/blob/main/cips/cip-X.md).
-
-## Sign a file
-
-To sign a file `sign-file` command offers some helpful flags:
-
-```text
-      --encoding string          Choose an encoding method for the file content to be added as msg data (no-encoding|base64|hex) (default "no-encoding")
-      --indent string            Choose an indent for the tx (default "  ")
-      --notEmitUnpopulated       Don't show unpopulated fields in the tx
-      --output string            Choose an output format for the tx (json|text (default "json")
-      --output-document string   The document will be written to the given file instead of STDOUT
-```
-
-The `encoding` flag lets you choose how the contents of the file should be encoded. For example:
-
-* `simd off-chain sign-file alice myFile.json`
-
-    * ```json
-      {
-        "@type":  "/offchain.MsgSignArbitraryData",
-        "appDomain":  "simd",
-        "signer":  "cosmos1x33fy6rusfprkntvjsfregss7rvsvyy4lkwrqu",
-        "data":  "Hello World!\n"
-      }
-     ```
-
-* `simd off-chain sign-file alice myFile.json --encoding base64`
-
-    * ```json
-      {
-        "@type":  "/offchain.MsgSignArbitraryData",
-        "appDomain":  "simd",
-        "signer":  "cosmos1x33fy6rusfprkntvjsfregss7rvsvyy4lkwrqu",
-        "data":  "SGVsbG8gV29ybGQhCg=="
-      }
-     ```
-
-* `simd off-chain sign-file alice myFile.json --encoding hex`
-
-    * ```json
-        {
-          "@type":  "/offchain.MsgSignArbitraryData",
-          "appDomain":  "simd",
-          "signer":  "cosmos1x33fy6rusfprkntvjsfregss7rvsvyy4lkwrqu",
-          "data":  "48656c6c6f20576f726c64210a"
-        }
-       ```
-
-## Verify a file
-
-To verify a file only the key name used and the previously signed file are needed.
-
-```text
-➜ simd off-chain verify-file alice signedFile.json
-Verification OK!
-```
+`autocli` lets you generate CLI for your Cosmos SDK-based applications without any cobra boilerplate. It allows you to easily generate CLI commands and flags from your protobuf messages, and provides many options for customising the behavior of your CLI application.

@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
+	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -75,9 +73,6 @@ func (ar AccountRetriever) EnsureExists(clientCtx client.Context, addr sdk.AccAd
 func (ar AccountRetriever) GetAccountNumberSequence(clientCtx client.Context, addr sdk.AccAddress) (uint64, uint64, error) {
 	acc, err := ar.GetAccount(clientCtx, addr)
 	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			return 0, 0, nil
-		}
 		return 0, 0, err
 	}
 

@@ -51,13 +51,26 @@ func NewMulti[ReferenceKey, PrimaryKey, Value any](
 	if o.uncheckedValue {
 		return &Multi[ReferenceKey, PrimaryKey, Value]{
 			getRefKey: getRefKeyFunc,
-			refKeys:   collections.NewKeySet(schema, prefix, name, collections.PairKeyCodec(refCodec, pkCodec), collections.WithKeySetUncheckedValue()),
+			refKeys: collections.NewKeySet(
+				schema,
+				prefix,
+				name,
+				collections.PairKeyCodec(refCodec, pkCodec),
+				collections.WithKeySetUncheckedValue(),
+				collections.WithKeySetSecondaryIndex(),
+			),
 		}
 	}
 
 	return &Multi[ReferenceKey, PrimaryKey, Value]{
 		getRefKey: getRefKeyFunc,
-		refKeys:   collections.NewKeySet(schema, prefix, name, collections.PairKeyCodec(refCodec, pkCodec)),
+		refKeys: collections.NewKeySet(
+			schema,
+			prefix,
+			name,
+			collections.PairKeyCodec(refCodec, pkCodec),
+			collections.WithKeySetSecondaryIndex(),
+		),
 	}
 }
 
@@ -104,6 +117,12 @@ func (m *Multi[ReferenceKey, PrimaryKey, Value]) unreference(ctx context.Context
 func (m *Multi[ReferenceKey, PrimaryKey, Value]) Iterate(ctx context.Context, ranger collections.Ranger[collections.Pair[ReferenceKey, PrimaryKey]]) (MultiIterator[ReferenceKey, PrimaryKey], error) {
 	iter, err := m.refKeys.Iterate(ctx, ranger)
 	return (MultiIterator[ReferenceKey, PrimaryKey])(iter), err
+}
+
+func (m *Multi[ReferenceKey, PrimaryKey, Value]) IterateRaw(
+	ctx context.Context, start, end []byte, order collections.Order,
+) (collections.Iterator[collections.Pair[ReferenceKey, PrimaryKey], collections.NoValue], error) {
+	return m.refKeys.IterateRaw(ctx, start, end, order)
 }
 
 func (m *Multi[ReferenceKey, PrimaryKey, Value]) Walk(

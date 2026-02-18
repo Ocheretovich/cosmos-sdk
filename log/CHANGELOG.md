@@ -20,7 +20,27 @@ Each entry must include the Github issue reference in the following format:
 
 # Changelog
 
-## [Unreleased]
+## [v2.0.1](https://github.com/cosmos/cosmos-sdk/releases/tag/log%2Fv2.0.1) - 2026-02-11
+
+* [#25894](https://github.com/cosmos/cosmos-sdk/pull/25894) Fix `slog.Logger` wrapper so that the correct source/line information is tracked.
+
+## [v2.0.0](https://github.com/cosmos/cosmos-sdk/releases/tag/log%2Fv2.0.0) - 2026-02-10
+
+* [#25778](https://github.com/cosmos/cosmos-sdk/pull/25778) Introduce log v2, adding contextual methods to Logger for trace correlation. See [Upgrading](../UPGRADING.md) for more details.
+
+## [v1.6.0](https://github.com/cosmos/cosmos-sdk/releases/tag/log/v1.6.0) - 2025-05-13
+
+* [#24720](https://github.com/cosmos/cosmos-sdk/pull/24720) add `VerboseModeLogger` extension interface and `VerboseLevel` configuration option for increasing log verbosity during sensitive operations such as upgrades.
+
+## [v1.5.1](https://github.com/cosmos/cosmos-sdk/releases/tag/log/v1.5.1) - 2025-03-07
+
+* [#23928](https://github.com/cosmos/cosmos-sdk/pull/23928) Bump sonic json library to [v1.13.1](https://github.com/bytedance/sonic/releases/tag/v1.13.1) for Go 1.24 compatibility.
+
+## [v1.5.0](https://github.com/cosmos/cosmos-sdk/releases/tag/log/v1.5.0) - 2024-11-07
+
+* [#22466](https://github.com/cosmos/cosmos-sdk/pull/22466) Disable coloring in testing logger.
+* [#22233](https://github.com/cosmos/cosmos-sdk/pull/22233) Use sonic json library for faster json handling.
+* [#22347](https://github.com/cosmos/cosmos-sdk/pull/22347) Add `cosmossdk.io/log/slog` to allow using a standard library log/slog-backed logger. This required to bump the minimum go version of `cosmossdk.io/log` to 1.21.
 
 ## [v1.4.1](https://github.com/cosmos/cosmos-sdk/releases/tag/log/v1.4.1) - 2024-08-16
 
@@ -61,7 +81,7 @@ Each entry must include the Github issue reference in the following format:
 
 ## [v0.1.0](https://github.com/cosmos/cosmos-sdk/releases/tag/log/v0.1.0) - 2023-03-13
 
-* Introducing a standalone SDK logger package (`comossdk.io/log`).
+* Introducing a standalone SDK logger package (`cosmossdk.io/log`).
   It replaces CometBFT logger and provides a common interface for all SDK components.
   The default logger (`NewLogger`) is using [zerolog](https://github.com/rs/zerolog),
   but it can be easily replaced with any implementation that implements the `log.Logger` interface.

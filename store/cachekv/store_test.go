@@ -248,15 +248,15 @@ func TestCacheKVMergeIteratorBasics(t *testing.T) {
 	st.Write()
 	assertIterateDomain(t, st, 2)
 
-	// remove one in cache and assert it's not
+	// remove one in cache and assert its not
 	st.Delete(k1)
 	assertIterateDomain(t, st, 1)
 
-	// write the delete and assert it's not there
+	// write the delete and assert its not there
 	st.Write()
 	assertIterateDomain(t, st, 1)
 
-	// delete the other key in cache and asserts it's empty
+	// delete the other key in cache and asserts its empty
 	st.Delete(k)
 	assertIterateDomain(t, st, 0)
 }
@@ -464,7 +464,7 @@ func randInt(n int) int {
 	return unsafe.NewRand().Int() % n
 }
 
-// useful for replaying a error case if we find one
+// useful for replaying an error case if we find one
 func doOp(t *testing.T, st types.CacheKVStore, truth dbm.DB, op int, args ...int) {
 	t.Helper()
 	switch op {
@@ -474,17 +474,19 @@ func doOp(t *testing.T, st types.CacheKVStore, truth dbm.DB, op int, args ...int
 		err := truth.Set(keyFmt(k), valFmt(k))
 		require.NoError(t, err)
 	case opSetRange:
-		start := args[0]
-		end := args[1]
+		require.True(t, len(args) > 1)
+		start := args[0] //nolint:gosec // this is not out of range
+		end := args[1]   //nolint:gosec // this is not out of range
 		setRange(t, st, truth, start, end)
 	case opDel:
-		k := args[0]
+		k := args[0] //nolint:gosec // this is not out of range
 		st.Delete(keyFmt(k))
 		err := truth.Delete(keyFmt(k))
 		require.NoError(t, err)
 	case opDelRange:
-		start := args[0]
-		end := args[1]
+		require.True(t, len(args) > 1)
+		start := args[0] //nolint:gosec // this is not out of range
+		end := args[1]   //nolint:gosec // this is not out of range
 		deleteRange(t, st, truth, start, end)
 	case opWrite:
 		st.Write()
@@ -543,7 +545,6 @@ func assertIterateDomainCheck(t *testing.T, st types.KVStore, mem dbm.DB, r []ke
 	require.NoError(t, err)
 
 	krc := newKeyRangeCounter(r)
-	i := 0
 
 	for ; krc.valid(); krc.next() {
 		require.True(t, itr.Valid())
@@ -560,7 +561,6 @@ func assertIterateDomainCheck(t *testing.T, st types.KVStore, mem dbm.DB, r []ke
 
 		itr.Next()
 		itr2.Next()
-		i++
 	}
 
 	require.False(t, itr.Valid())
@@ -674,8 +674,10 @@ func BenchmarkCacheKVStoreGetNoKeyFound(b *testing.B) {
 	st := newCacheKVStore()
 	b.ResetTimer()
 	// assumes b.N < 2**24
-	for i := 0; i < b.N; i++ {
-		st.Get([]byte{byte((i & 0xFF0000) >> 16), byte((i & 0xFF00) >> 8), byte(i & 0xFF)})
+	idx := 0
+	for b.Loop() {
+		st.Get([]byte{byte((idx & 0xFF0000) >> 16), byte((idx & 0xFF00) >> 8), byte(idx & 0xFF)})
+		idx++
 	}
 }
 
@@ -688,7 +690,9 @@ func BenchmarkCacheKVStoreGetKeyFound(b *testing.B) {
 	}
 	b.ResetTimer()
 	// assumes b.N < 2**24
-	for i := 0; i < b.N; i++ {
-		st.Get([]byte{byte((i & 0xFF0000) >> 16), byte((i & 0xFF00) >> 8), byte(i & 0xFF)})
+	idx := 0
+	for b.Loop() {
+		st.Get([]byte{byte((idx & 0xFF0000) >> 16), byte((idx & 0xFF00) >> 8), byte(idx & 0xFF)})
+		idx++
 	}
 }

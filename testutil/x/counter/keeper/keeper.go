@@ -9,25 +9,25 @@ import (
 	"google.golang.org/grpc/status"
 
 	"cosmossdk.io/collections"
-	"cosmossdk.io/core/appmodule"
-	"cosmossdk.io/core/event"
+	"cosmossdk.io/core/store"
 
 	"github.com/cosmos/cosmos-sdk/testutil/x/counter/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-var StoreKey = "Counter"
-
 type Keeper struct {
-	appmodule.Environment
+	storeService store.KVStoreService
 
 	CountStore collections.Item[int64]
+
+	hooks types.CounterHooks
 }
 
-func NewKeeper(env appmodule.Environment) Keeper {
-	sb := collections.NewSchemaBuilder(env.KVStoreService)
-	return Keeper{
-		Environment: env,
-		CountStore:  collections.NewItem(sb, collections.NewPrefix(0), "count", collections.Int64Value),
+func NewKeeper(storeService store.KVStoreService) *Keeper {
+	sb := collections.NewSchemaBuilder(storeService)
+	return &Keeper{
+		storeService: storeService,
+		CountStore:   collections.NewItem(sb, collections.NewPrefix(0), "count", collections.Int64Value),
 	}
 }
 
@@ -35,7 +35,7 @@ func NewKeeper(env appmodule.Environment) Keeper {
 
 var _ types.QueryServer = Keeper{}
 
-// Params queries params of consensus module
+// GetCount queries the x/counter count
 func (k Keeper) GetCount(ctx context.Context, _ *types.QueryGetCountRequest) (*types.QueryGetCountResponse, error) {
 	count, err := k.CountStore.Get(ctx)
 	if err != nil {
@@ -63,18 +63,44 @@ func (k Keeper) IncreaseCount(ctx context.Context, msg *types.MsgIncreaseCounter
 			return nil, err
 		}
 	}
-	if err := k.CountStore.Set(ctx, num+msg.Count); err != nil {
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	if err := k.CountStore.Set(sdkCtx, num+msg.Count); err != nil {
 		return nil, err
 	}
 
-	if err := k.EventService.EventManager(ctx).EmitKV(
-		"increase_counter",
-		event.NewAttribute("signer", msg.Signer),
-		event.NewAttribute("new count", fmt.Sprint(num+msg.Count))); err != nil {
+	if err := k.Hooks().AfterIncreaseCount(sdkCtx, num+msg.Count); err != nil {
 		return nil, err
 	}
+
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+		"increase_counter",
+		sdk.NewAttribute("signer", msg.Signer),
+		sdk.NewAttribute("new count", fmt.Sprint(num+msg.Count))),
+	)
 
 	return &types.MsgIncreaseCountResponse{
 		NewCount: num + msg.Count,
 	}, nil
+}
+
+// Hooks gets the hooks for counter Keeper
+func (k *Keeper) Hooks() types.CounterHooks {
+	if k.hooks == nil {
+		// return a no-op implementation if no hooks are set
+		return types.MultiCounterHooks{}
+	}
+
+	return k.hooks
+}
+
+// SetHooks sets the hooks for counter
+func (k *Keeper) SetHooks(gh types.CounterHooks) *Keeper {
+	if k.hooks != nil {
+		panic("cannot set governance hooks twice")
+	}
+
+	k.hooks = gh
+	return k
 }

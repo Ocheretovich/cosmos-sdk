@@ -7,16 +7,18 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
+
+	"github.com/cosmos/cosmos-sdk/testutil/systemtests"
 )
 
 func TestStakeUnstake(t *testing.T) {
 	// Scenario:
 	// delegate tokens to validator
 	// undelegate some tokens
-
+	sut := systemtests.Sut
 	sut.ResetChain(t)
 
-	cli := NewCLIWrapper(t, sut, verbose)
+	cli := systemtests.NewCLIWrapper(t, sut, systemtests.Verbose)
 
 	// add genesis account with some tokens
 	account1Addr := cli.AddKey("account1")
@@ -32,7 +34,7 @@ func TestStakeUnstake(t *testing.T) {
 
 	// stake tokens
 	rsp = cli.Run("tx", "staking", "delegate", valAddr, "10000stake", "--from="+account1Addr, "--fees=1stake")
-	RequireTxSuccess(t, rsp)
+	systemtests.RequireTxSuccess(t, rsp)
 
 	t.Log(cli.QueryBalance(account1Addr, "stake"))
 	assert.Equal(t, int64(9989999), cli.QueryBalance(account1Addr, "stake"))
@@ -43,7 +45,7 @@ func TestStakeUnstake(t *testing.T) {
 
 	// unstake tokens
 	rsp = cli.Run("tx", "staking", "unbond", valAddr, "5000stake", "--from="+account1Addr, "--fees=1stake")
-	RequireTxSuccess(t, rsp)
+	systemtests.RequireTxSuccess(t, rsp)
 
 	rsp = cli.CustomQuery("q", "staking", "delegation", account1Addr, valAddr)
 	assert.Equal(t, "5000", gjson.Get(rsp, "delegation_response.balance.amount").String(), rsp)

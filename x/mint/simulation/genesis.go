@@ -1,14 +1,12 @@
 package simulation
 
 import (
-	"encoding/json"
-	"fmt"
 	"math/rand"
 
 	"cosmossdk.io/math"
-	"cosmossdk.io/x/mint/types"
 
 	"github.com/cosmos/cosmos-sdk/types/module"
+	"github.com/cosmos/cosmos-sdk/x/mint/types"
 )
 
 // Simulation parameter constants
@@ -69,11 +67,5 @@ func RandomizedGenState(simState *module.SimulationState) {
 	params := types.NewParams(mintDenom, inflationRateChange, inflationMax, inflationMin, goalBonded, blocksPerYear, math.ZeroInt())
 
 	mintGenesis := types.NewGenesisState(types.InitialMinter(inflation), params)
-
-	bz, err := json.MarshalIndent(&mintGenesis, "", " ")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Selected randomly generated minting parameters:\n%s\n", bz)
 	simState.GenState[types.ModuleName] = simState.Cdc.MustMarshalJSON(mintGenesis)
 }

@@ -1,13 +1,13 @@
-package module
+package authz
 
 import (
 	"fmt"
 
 	authzv1beta1 "cosmossdk.io/api/cosmos/authz/v1beta1"
 	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
-	bank "cosmossdk.io/x/bank/types"
 
 	"github.com/cosmos/cosmos-sdk/version"
+	bank "github.com/cosmos/cosmos-sdk/x/bank/types"
 )
 
 // AutoCLIOptions implements the autocli.HasAutoCLIConfig interface.
@@ -48,7 +48,7 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 		},
 		Tx: &autocliv1.ServiceCommandDescriptor{
 			Service:              authzv1beta1.Msg_ServiceDesc.ServiceName,
-			EnhanceCustomCommand: true,
+			EnhanceCustomCommand: false, // use custom commands only until v0.51
 			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
 				{
 					RpcMethod: "Exec",
@@ -69,19 +69,6 @@ func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 						{ProtoField: "grantee"},
 						{ProtoField: "msg_type_url"},
 					},
-				},
-				{
-					RpcMethod: "RevokeAll",
-					Use:       "revoke-all --from [signer]",
-					Short:     "Revoke all authorizations from the signer",
-					Example:   fmt.Sprintf("%s tx authz revoke-all --from=cosmos1skj..", version.AppName),
-				},
-				{
-					RpcMethod: "PruneExpiredGrants",
-					Use:       "prune-grants --from [granter]",
-					Short:     "Prune expired grants",
-					Long:      "Prune up to 75 expired grants in order to reduce the size of the store when the number of expired grants is large.",
-					Example:   fmt.Sprintf(`$ %s tx authz prune-grants --from [mykey]`, version.AppName),
 				},
 			},
 		},

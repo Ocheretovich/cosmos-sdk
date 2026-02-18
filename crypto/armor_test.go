@@ -13,7 +13,7 @@ import (
 
 	"cosmossdk.io/core/address"
 	"cosmossdk.io/depinject"
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
@@ -25,7 +25,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	"github.com/cosmos/cosmos-sdk/crypto/xsalsa20symmetric"
-	_ "github.com/cosmos/cosmos-sdk/runtime"
+	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil/configurator"
 	"github.com/cosmos/cosmos-sdk/types"
 )
@@ -84,8 +84,8 @@ func TestArmorUnarmorPubKey(t *testing.T) {
 		configurator.NewAppConfig(),
 		depinject.Supply(log.NewNopLogger(),
 			func() address.Codec { return addresscodec.NewBech32Codec("cosmos") },
-			func() address.ValidatorAddressCodec { return addresscodec.NewBech32Codec("cosmosvaloper") },
-			func() address.ConsensusAddressCodec { return addresscodec.NewBech32Codec("cosmosvalcons") },
+			func() runtime.ValidatorAddressCodec { return addresscodec.NewBech32Codec("cosmosvaloper") },
+			func() runtime.ConsensusAddressCodec { return addresscodec.NewBech32Codec("cosmosvalcons") },
 		),
 	), &cdc)
 	require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestBcryptLegacyEncryption(t *testing.T) {
 	keyBcrypt = cmtcrypto.Sha256(keyBcrypt)
 
 	// bcrypt + xsalsa20symmetric
-	encBytesBcryptXsalsa20symetric := xsalsa20symmetric.EncryptSymmetric(privKeyBytes, keyBcrypt)
+	encBytesBcryptXsalsa20symmetric := xsalsa20symmetric.EncryptSymmetric(privKeyBytes, keyBcrypt)
 
 	type testCase struct {
 		description string
@@ -236,7 +236,7 @@ func TestBcryptLegacyEncryption(t *testing.T) {
 		},
 		{
 			description: "Bcrypt + xsalsa20symmetric",
-			armor:       crypto.EncodeArmor("TENDERMINT PRIVATE KEY", headerBcrypt, encBytesBcryptXsalsa20symetric),
+			armor:       crypto.EncodeArmor("TENDERMINT PRIVATE KEY", headerBcrypt, encBytesBcryptXsalsa20symmetric),
 		},
 	} {
 		t.Run(scenario.description, func(t *testing.T) {
@@ -254,7 +254,7 @@ func TestBcryptLegacyEncryption(t *testing.T) {
 		"salt": fmt.Sprintf("%X", saltBytes),
 	}
 
-	_, _, err := crypto.UnarmorDecryptPrivKey(crypto.EncodeArmor("TENDERMINT PRIVATE KEY", headerWithoutKdf, encBytesBcryptXsalsa20symetric), "passphrase")
+	_, _, err := crypto.UnarmorDecryptPrivKey(crypto.EncodeArmor("TENDERMINT PRIVATE KEY", headerWithoutKdf, encBytesBcryptXsalsa20symmetric), "passphrase")
 	require.Error(t, err)
 	require.Equal(t, "unrecognized KDF type: wrongKdf", err.Error())
 }

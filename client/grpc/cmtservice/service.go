@@ -3,9 +3,8 @@ package cmtservice
 import (
 	"context"
 
-	abci "github.com/cometbft/cometbft/api/cometbft/abci/v1"
+	abci "github.com/cometbft/cometbft/abci/types"
 	gogogrpc "github.com/cosmos/gogoproto/grpc"
-	gogoprotoany "github.com/cosmos/gogoproto/types/any"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,12 +20,12 @@ import (
 )
 
 var (
-	_ ServiceServer                        = queryServer{}
-	_ gogoprotoany.UnpackInterfacesMessage = &GetLatestValidatorSetResponse{}
+	_ ServiceServer                      = queryServer{}
+	_ codectypes.UnpackInterfacesMessage = &GetLatestValidatorSetResponse{}
 )
 
 type (
-	abciQueryFn = func(context.Context, *abci.QueryRequest) (*abci.QueryResponse, error)
+	abciQueryFn = func(context.Context, *abci.RequestQuery) (*abci.ResponseQuery, error)
 
 	queryServer struct {
 		clientCtx         client.Context
@@ -56,7 +55,9 @@ func (s queryServer) GetSyncing(ctx context.Context, _ *GetSyncingRequest) (*Get
 	}
 
 	return &GetSyncingResponse{
-		Syncing: status.SyncInfo.CatchingUp,
+		Syncing:             status.SyncInfo.CatchingUp,
+		EarliestBlockHeight: status.SyncInfo.EarliestBlockHeight,
+		LatestBlockHeight:   status.SyncInfo.LatestBlockHeight,
 	}, nil
 }
 
@@ -88,7 +89,7 @@ func (s queryServer) GetBlockByHeight(ctx context.Context, req *GetBlockByHeight
 	}
 
 	if req.Height > blockHeight {
-		return nil, status.Error(codes.InvalidArgument, "requested block height is bigger then the chain length")
+		return nil, status.Error(codes.InvalidArgument, "requested block height is bigger than the chain length")
 	}
 
 	protoBlockID, protoBlock, err := GetProtoBlock(ctx, s.clientCtx, &req.Height)
@@ -113,7 +114,7 @@ func (s queryServer) GetLatestValidatorSet(ctx context.Context, req *GetLatestVa
 	return ValidatorsOutput(ctx, s.clientCtx, nil, page, limit)
 }
 
-func (m *GetLatestValidatorSetResponse) UnpackInterfaces(unpacker gogoprotoany.AnyUnpacker) error {
+func (m *GetLatestValidatorSetResponse) UnpackInterfaces(unpacker codectypes.AnyUnpacker) error {
 	var pubKey cryptotypes.PubKey
 	for _, val := range m.Validators {
 		err := unpacker.UnpackAny(val.PubKey, &pubKey)
@@ -251,16 +252,81 @@ func (s queryServer) ABCIQuery(ctx context.Context, req *ABCIQueryRequest) (*ABC
 	if err != nil {
 		return nil, err
 	}
-	return &ABCIQueryResponse{
-		Code:      res.Code,
-		Log:       res.Log,
-		Info:      res.Info,
-		Index:     res.Index,
-		Key:       res.Key,
-		Value:     res.Value,
-		ProofOps:  res.ProofOps,
-		Height:    res.Height,
-		Codespace: res.Codespace,
+	return FromABCIResponseQuery(res), nil
+}
+
+// GetBlockResults implements ServiceServer.GetBlockResults
+func (s queryServer) GetBlockResults(ctx context.Context, req *GetBlockResultsRequest) (*GetBlockResultsResponse, error) {
+	blockHeight, err := getBlockHeight(ctx, s.clientCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Height > blockHeight {
+		return nil, status.Error(codes.InvalidArgument, "requested block height is bigger than the chain length")
+	}
+
+	return getBlockResultsResponse(ctx, s.clientCtx, &req.Height)
+}
+
+// GetLatestBlockResults implements ServiceServer.GetLatestBlockResults
+func (s queryServer) GetLatestBlockResults(ctx context.Context, _ *GetLatestBlockResultsRequest) (*GetLatestBlockResultsResponse, error) {
+	return getLatestBlockResultsResponse(ctx, s.clientCtx)
+}
+
+func getBlockResultsResponse(ctx context.Context, clientCtx client.Context, height *int64) (*GetBlockResultsResponse, error) {
+	results, err := getBlockResults(ctx, clientCtx, height)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert FinalizeBlockEvents from []Event to []*Event
+	events := make([]*abci.Event, len(results.FinalizeBlockEvents))
+	for i := range results.FinalizeBlockEvents {
+		events[i] = &results.FinalizeBlockEvents[i]
+	}
+
+	// Convert ValidatorUpdates from []ValidatorUpdate to []*ValidatorUpdate
+	valUpdates := make([]*abci.ValidatorUpdate, len(results.ValidatorUpdates))
+	for i := range results.ValidatorUpdates {
+		valUpdates[i] = &results.ValidatorUpdates[i]
+	}
+
+	return &GetBlockResultsResponse{
+		Height:                results.Height,
+		TxsResults:            results.TxsResults,
+		FinalizeBlockEvents:   events,
+		ValidatorUpdates:      valUpdates,
+		ConsensusParamUpdates: results.ConsensusParamUpdates,
+		AppHash:               results.AppHash,
+	}, nil
+}
+
+func getLatestBlockResultsResponse(ctx context.Context, clientCtx client.Context) (*GetLatestBlockResultsResponse, error) {
+	results, err := getBlockResults(ctx, clientCtx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert FinalizeBlockEvents from []Event to []*Event
+	events := make([]*abci.Event, len(results.FinalizeBlockEvents))
+	for i := range results.FinalizeBlockEvents {
+		events[i] = &results.FinalizeBlockEvents[i]
+	}
+
+	// Convert ValidatorUpdates from []ValidatorUpdate to []*ValidatorUpdate
+	valUpdates := make([]*abci.ValidatorUpdate, len(results.ValidatorUpdates))
+	for i := range results.ValidatorUpdates {
+		valUpdates[i] = &results.ValidatorUpdates[i]
+	}
+
+	return &GetLatestBlockResultsResponse{
+		Height:                results.Height,
+		TxsResults:            results.TxsResults,
+		FinalizeBlockEvents:   events,
+		ValidatorUpdates:      valUpdates,
+		ConsensusParamUpdates: results.ConsensusParamUpdates,
+		AppHash:               results.AppHash,
 	}, nil
 }
 

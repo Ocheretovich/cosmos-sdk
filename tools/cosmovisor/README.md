@@ -7,21 +7,21 @@ sidebar_position: 1
 `cosmovisor` is a process manager for Cosmos SDK application binaries that automates application binary switch at chain upgrades.
 It polls the `upgrade-info.json` file that is created by the x/upgrade module at upgrade height, and then can automatically download the new binary, stop the current binary, switch from the old binary to the new one, and finally restart the node with the new binary.
 
-* [Cosmovisor](#cosmovisor)
-  * [Design](#design)
-  * [Contributing](#contributing)
-  * [Setup](#setup)
+* [Design](#design)
+* [Contributing](#contributing)
+* [Setup](#setup)
     * [Installation](#installation)
     * [Command Line Arguments And Environment Variables](#command-line-arguments-and-environment-variables)
     * [Folder Layout](#folder-layout)
-  * [Usage](#usage)
+* [Usage](#usage)
     * [Initialization](#initialization)
     * [Detecting Upgrades](#detecting-upgrades)
     * [Adding Upgrade Binary](#adding-upgrade-binary)
     * [Auto-Download](#auto-download)
-  * [Example: SimApp Upgrade](#example-simapp-upgrade)
+    * [Preparing for an Upgrade](#preparing-for-an-upgrade)
+* [Example: SimApp Upgrade](#example-simapp-upgrade)
     * [Chain Setup](#chain-setup)
-      * [Prepare Cosmovisor and Start the Chain](#prepare-cosmovisor-and-start-the-chain)
+        * [Prepare Cosmovisor and Start the Chain](#prepare-cosmovisor-and-start-the-chain)
     * [Update App](#update-app)
 
 ## Design
@@ -45,7 +45,7 @@ Versions prior to v1.0.0 have a vulnerability that could lead to a DOS. Please u
 
 ## Contributing
 
-Cosmovisor is part of the Cosmos SDK monorepo, but it's a separate module with it's own release schedule.
+Cosmovisor is part of the Cosmos SDK monorepo, but it's a separate module with its own release schedule.
 
 Release branches have the following format `release/cosmovisor/vA.B.x`, where A and B are a number (e.g. `release/cosmovisor/v1.3.x`). Releases are tagged using the following format: `cosmovisor/vA.B.C`.
 
@@ -84,7 +84,7 @@ The first argument passed to `cosmovisor` is the action for `cosmovisor` to take
 * `run` - Run the configured binary using the rest of the provided arguments.
 * `version` - Output the `cosmovisor` version and also run the binary with the `version` argument.
 * `config` - Display the current `cosmovisor` configuration, that means displaying the environment variables value that `cosmovisor` is using.
-* `add-upgrade` - Add an upgrade manually to `cosmovisor`. This command allow you to easily add the binary corresponding to an upgrade in cosmovisor.
+* `add-upgrade` - Add an upgrade manually to `cosmovisor`. This command allows you to easily add the binary corresponding to an upgrade in cosmovisor.
 
 All arguments passed to `cosmovisor run` will be passed to the application binary (as a subprocess). `cosmovisor` will return `/dev/stdout` and `/dev/stderr` of the subprocess as its own. For this reason, `cosmovisor run` cannot accept any command-line arguments other than those available to the application binary.
 
@@ -105,7 +105,7 @@ All arguments passed to `cosmovisor run` will be passed to the application binar
 * `COSMOVISOR_COLOR_LOGS` (defaults to `true`). If set to true, this will colorise Cosmovisor logs (but not the underlying process).
 * `COSMOVISOR_TIMEFORMAT_LOGS` (defaults to `kitchen`). If set to a value (`layout|ansic|unixdate|rubydate|rfc822|rfc822z|rfc850|rfc1123|rfc1123z|rfc3339|rfc3339nano|kitchen`), this will add timestamp prefix to Cosmovisor logs (but not the underlying process).
 * `COSMOVISOR_CUSTOM_PREUPGRADE` (defaults to ``).  If set, this will run $DAEMON_HOME/cosmovisor/$COSMOVISOR_CUSTOM_PREUPGRADE prior to upgrade with the arguments [ upgrade.Name, upgrade.Height ].  Executes a custom script (separate and prior to the chain daemon pre-upgrade command)
-* `COSMOVISOR_DISABLE_RECASE` (defaults to `false`).  If set to true, the upgrade directory will expected to match the upgrade plan name without any case changes
+* `COSMOVISOR_DISABLE_RECASE` (defaults to `false`).  If set to true, the upgrade directory will be expected to match the upgrade plan name without any case changes
 
 ### Folder Layout
 
@@ -125,7 +125,7 @@ All arguments passed to `cosmovisor run` will be passed to the application binar
 └── preupgrade.sh (optional)
 ```
 
-The `cosmovisor/` directory includes a subdirectory for each version of the application (i.e. `genesis` or `upgrades/<name>`). Within each subdirectory is the application binary (i.e. `bin/$DAEMON_NAME`) and any additional auxiliary files associated with each binary. `current` is a symbolic link to the currently active directory (i.e. `genesis` or `upgrades/<name>`). The `name` variable in `upgrades/<name>` is the lowercased URI-encoded name of the upgrade as specified in the upgrade module plan. Note that the upgrade name path are normalized to be lowercased: for instance, `MyUpgrade` is normalized to `myupgrade`, and its path is `upgrades/myupgrade`.
+The `cosmovisor/` directory includes a subdirectory for each version of the application (i.e. `genesis` or `upgrades/<name>`). Within each subdirectory is the application binary (i.e. `bin/$DAEMON_NAME`) and any additional auxiliary files associated with each binary. `current` is a symbolic link to the currently active directory (i.e. `genesis` or `upgrades/<name>`). The `name` variable in `upgrades/<name>` is the lowercased URI-encoded name of the upgrade as specified in the upgrade module plan. Note that upgrade name paths are normalized to lowercase: for instance, `MyUpgrade` is normalized to `myupgrade`, and its path is `upgrades/myupgrade`.
 
 Please note that `$DAEMON_HOME/cosmovisor` only stores the *application binaries*. The `cosmovisor` binary itself can be stored in any typical location (e.g. `/usr/local/bin`). The application will continue to store its data in the default data directory (e.g. `$HOME/.simapp`) or the data directory specified with the `--home` flag. `$DAEMON_HOME` is dependent of the data directory and must be set to the same directory as the data directory, you will end up with a configuration like the following:
 
@@ -188,7 +188,7 @@ When the upgrade mechanism is triggered, `cosmovisor` will:
 
 `cosmovisor` has an `add-upgrade` command that allows to easily link a binary to an upgrade. It creates a new folder in `cosmovisor/upgrades/<name>` and copies the provided executable file to `cosmovisor/upgrades/<name>/bin/<DAEMON_NAME>`.
 
-Using the `--upgrade-height` flag allows to specify at which height the binary should be switched, without going via a gorvernance proposal.
+Using the `--upgrade-height` flag allows to specify at which height the binary should be switched, without going via a governance proposal.
 This enables support for an emergency coordinated upgrades where the binary must be switched at a specific height, but there is no time to go through a governance proposal.
 
 :::warning
@@ -200,9 +200,9 @@ Take this into consideration when using `--upgrade-height`.
 
 Generally, `cosmovisor` requires that the system administrator place all relevant binaries on disk before the upgrade happens. However, for people who don't need such control and want an automated setup (maybe they are syncing a non-validating fullnode and want to do little maintenance), there is another option.
 
-**NOTE: we don't recommend using auto-download** because it doesn't verify in advance if a binary is available. If there will be any issue with downloading a binary, the cosmovisor will stop and won't restart an App (which could lead to a chain halt).
+**NOTE: we don't recommend using auto-download** because it doesn't verify in advance if a binary is available. If there will be any issue with downloading a binary, the cosmovisor will stop and won't restart the app (which could lead to a chain halt).
 
-If `DAEMON_ALLOW_DOWNLOAD_BINARIES` is set to `true`, and no local binary can be found when an upgrade is triggered, `cosmovisor` will attempt to download and install the binary itself based on the instructions in the `info` attribute in the `data/upgrade-info.json` file. The files is constructed by the x/upgrade module and contains data from the upgrade `Plan` object. The `Plan` has an info field that is expected to have one of the following two valid formats to specify a download:
+If `DAEMON_ALLOW_DOWNLOAD_BINARIES` is set to `true`, and no local binary can be found when an upgrade is triggered, `cosmovisor` will attempt to download and install the binary itself based on the instructions in the `info` attribute in the `data/upgrade-info.json` file. The file is constructed by the x/upgrade module and contains data from the upgrade `Plan` object. The `Plan` has an info field that is expected to have one of the following two valid formats to specify a download:
 
 1. Store an os/architecture -> binary URI map in the upgrade plan info field as JSON under the `"binaries"` key. For example:
 
@@ -262,6 +262,38 @@ sha256sum ./testdata/repo/zip_directory/autod.zip
 The result will look something like the following: `29139e1381b8177aec909fab9a75d11381cab5adf7d3af0c05ff1c9c117743a7`.
 
 You can also use `sha512sum` if you would prefer to use longer hashes, or `md5sum` if you would prefer to use broken hashes. Whichever you choose, make sure to set the hash algorithm properly in the checksum argument to the URL.
+
+### Preparing for an Upgrade
+
+To prepare for an upgrade, use the `prepare-upgrade` command:
+
+```shell
+cosmovisor prepare-upgrade
+```
+
+This command performs the following actions:
+
+1. Retrieves upgrade information directly from the blockchain about the next scheduled upgrade.
+2. Downloads the new binary specified in the upgrade plan.
+3. Verifies the binary's checksum (if required by configuration).
+4. Places the new binary in the appropriate directory for Cosmovisor to use during the upgrade.
+
+The `prepare-upgrade` command provides detailed logging throughout the process, including:
+
+* The name and height of the upcoming upgrade
+* The URL from which the new binary is being downloaded
+* Confirmation of successful download and verification
+* The path where the new binary has been placed
+
+Example output:
+
+```bash
+INFO Preparing for upgrade name=v1.0.0 height=1000000
+INFO Downloading upgrade binary url=https://example.com/binary/v1.0.0?checksum=sha256:339911508de5e20b573ce902c500ee670589073485216bee8b045e853f24bce8
+INFO Upgrade preparation complete name=v1.0.0 height=1000000
+```
+
+*Note: The current way of downloading manually and placing the binary at the right place would still work.*
 
 ## Example: SimApp Upgrade
 

@@ -2,15 +2,14 @@ package signing
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
-	txsigning "cosmossdk.io/x/tx/signing"
 
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	"github.com/cosmos/cosmos-sdk/crypto/types/multisig"
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
+	txsigning "github.com/cosmos/cosmos-sdk/x/tx/signing"
 )
 
 // APISignModesToInternal converts a protobuf SignMode array to a signing.SignMode array.
@@ -79,7 +78,7 @@ func VerifySignature(
 			return err
 		}
 		if !pubKey.VerifySignature(signBytes, data.Signature) {
-			return fmt.Errorf("unable to verify single signer signature '%s' for signBytes '%s'", hex.EncodeToString(data.Signature), hex.EncodeToString(signBytes))
+			return fmt.Errorf("unable to verify single signer signature")
 		}
 		return nil
 

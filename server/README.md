@@ -15,7 +15,7 @@ utilities.
 
 It is vital that the root command of an application uses `PersistentPreRun()` cobra command
 property for executing the command, so all child commands have access to the server and client contexts.
-These contexts are set as their default values initially and may be modified,
+These contexts are set as their default values initially and maybe modified,
 scoped to the command, in their respective `PersistentPreRun()` functions. Note that
 the `client.Context` is typically pre-populated with "default" values that may be
 useful for all commands to inherit and override if necessary.
@@ -85,6 +85,6 @@ func newApp(logger log.Logger, db dbm.DB, traceStore io.Writer, appOpts serverty
 ```
 
 Note, some of the options provided are exposed via CLI flags in the start command
-and some are also allowed to be set in the application's `app.toml`. It is recommend
+and some are also allowed to be set in the application's `app.toml`. It is recommended
 to use the `cast` package for type safety guarantees and due to the limitations of
 CLI flag types.

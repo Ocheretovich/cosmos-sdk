@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,19 +10,20 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	errorsmod "cosmossdk.io/errors"
-	authclient "cosmossdk.io/x/auth/client"
-	"cosmossdk.io/x/auth/signing"
-	txsigning "cosmossdk.io/x/tx/signing"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	kmultisig "github.com/cosmos/cosmos-sdk/crypto/keys/multisig"
 	"github.com/cosmos/cosmos-sdk/crypto/types/multisig"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	signingtypes "github.com/cosmos/cosmos-sdk/types/tx/signing"
 	"github.com/cosmos/cosmos-sdk/version"
+	authclient "github.com/cosmos/cosmos-sdk/x/auth/client"
+	"github.com/cosmos/cosmos-sdk/x/auth/signing"
+	txsigning "github.com/cosmos/cosmos-sdk/x/tx/signing"
 )
 
 // GetMultiSignCommand returns the multi-sign command
@@ -73,16 +73,13 @@ The SIGN_MODE_DIRECT sign mode is not supported.'
 
 func makeMultiSignCmd() func(cmd *cobra.Command, args []string) (err error) {
 	return func(cmd *cobra.Command, args []string) (err error) {
-		file := args[0]
-		name := args[1]
-		sigsRaw := args[2:]
 		_ = cmd.Flags().Set(flags.FlagFrom, args[1])
 
 		clientCtx, err := client.GetClientTxContext(cmd)
 		if err != nil {
 			return err
 		}
-		parsedTx, err := authclient.ReadTxFromFile(clientCtx, file)
+		parsedTx, err := authclient.ReadTxFromFile(clientCtx, args[0])
 		if err != nil {
 			return err
 		}
@@ -101,9 +98,9 @@ func makeMultiSignCmd() func(cmd *cobra.Command, args []string) (err error) {
 			return err
 		}
 
-		k, err := clientCtx.Keyring.Key(name)
+		k, err := getMultisigRecord(clientCtx, args[1])
 		if err != nil {
-			return errorsmod.Wrap(err, "error getting keybase multisig account")
+			return err
 		}
 		pubKey, err := k.GetPubKey()
 		if err != nil {
@@ -131,14 +128,14 @@ func makeMultiSignCmd() func(cmd *cobra.Command, args []string) (err error) {
 		}
 
 		// read each signature and add it to the multisig if valid
-		for i := 0; i < len(sigsRaw); i++ {
-			sigs, err := unmarshalSignatureJSON(clientCtx, sigsRaw[i])
+		for i := 2; i < len(args); i++ {
+			sigs, err := unmarshalSignatureJSON(clientCtx, args[i])
 			if err != nil {
 				return err
 			}
 
 			if txFactory.ChainID() == "" {
-				return errors.New("set the chain id with either the --chain-id flag or config file")
+				return fmt.Errorf("set the chain id with either the --chain-id flag or config file")
 			}
 
 			for _, sig := range sigs {
@@ -192,7 +189,7 @@ func makeMultiSignCmd() func(cmd *cobra.Command, args []string) (err error) {
 		sigOnly, _ := cmd.Flags().GetBool(flagSigOnly)
 
 		var json []byte
-		json, err = marshalSignatureJSON(txCfg, txBuilder.GetTx(), sigOnly)
+		json, err = marshalSignatureJSON(txCfg, txBuilder, sigOnly)
 		if err != nil {
 			return err
 		}
@@ -249,9 +246,6 @@ func makeBatchMultisignCmd() func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) (err error) {
 		var clientCtx client.Context
 
-		file, name := args[0], args[1]
-		sigFiles := args[2:]
-
 		clientCtx, err = client.GetClientTxContext(cmd)
 		if err != nil {
 			return err
@@ -267,19 +261,19 @@ func makeBatchMultisignCmd() func(cmd *cobra.Command, args []string) error {
 		}
 
 		// reads tx from args[0]
-		scanner, err := authclient.ReadTxsFromInput(txCfg, file)
+		scanner, err := authclient.ReadTxsFromInput(txCfg, args[0])
 		if err != nil {
 			return err
 		}
 
-		k, err := clientCtx.Keyring.Key(name)
+		k, err := getMultisigRecord(clientCtx, args[1])
 		if err != nil {
-			return errorsmod.Wrap(err, "error getting keybase multisig account")
+			return err
 		}
 
 		var signatureBatch [][]signingtypes.SignatureV2
-		for i := 0; i < len(sigFiles); i++ {
-			sigs, err := readSignaturesFromFile(clientCtx, sigFiles[i])
+		for i := 2; i < len(args); i++ {
+			sigs, err := readSignaturesFromFile(clientCtx, args[i])
 			if err != nil {
 				return err
 			}
@@ -311,7 +305,7 @@ func makeBatchMultisignCmd() func(cmd *cobra.Command, args []string) error {
 		clientCtx.WithOutput(cmd.OutOrStdout())
 
 		for i := 0; scanner.Scan(); i++ {
-			txBuilder, err := txCfg.WrapTxBuilder(scanner.Tx())
+			txBldr, err := txCfg.WrapTxBuilder(scanner.Tx())
 			if err != nil {
 				return err
 			}
@@ -337,7 +331,7 @@ func makeBatchMultisignCmd() func(cmd *cobra.Command, args []string) error {
 				},
 			}
 
-			builtTx := txBuilder.GetTx()
+			builtTx := txBldr.GetTx()
 			adaptableTx, ok := builtTx.(signing.V2AdaptableTx)
 			if !ok {
 				return fmt.Errorf("expected Tx to be signing.V2AdaptableTx, got %T", builtTx)
@@ -362,14 +356,14 @@ func makeBatchMultisignCmd() func(cmd *cobra.Command, args []string) error {
 				Sequence: txFactory.Sequence(),
 			}
 
-			err = txBuilder.SetSignatures(sigV2)
+			err = txBldr.SetSignatures(sigV2)
 			if err != nil {
 				return err
 			}
 
 			sigOnly, _ := cmd.Flags().GetBool(flagSigOnly)
 			var json []byte
-			json, err = marshalSignatureJSON(txCfg, txBuilder.GetTx(), sigOnly)
+			json, err = marshalSignatureJSON(txCfg, txBldr, sigOnly)
 			if err != nil {
 				return err
 			}
@@ -393,7 +387,7 @@ func makeBatchMultisignCmd() func(cmd *cobra.Command, args []string) error {
 func unmarshalSignatureJSON(clientCtx client.Context, filename string) (sigs []signingtypes.SignatureV2, err error) {
 	var bytes []byte
 	if bytes, err = os.ReadFile(filename); err != nil {
-		return
+		return sigs, err
 	}
 	return clientCtx.TxConfig.UnmarshalSignatureJSON(bytes)
 }
@@ -416,4 +410,14 @@ func readSignaturesFromFile(ctx client.Context, filename string) (sigs []signing
 		sigs = append(sigs, sig...)
 	}
 	return sigs, nil
+}
+
+func getMultisigRecord(clientCtx client.Context, name string) (*keyring.Record, error) {
+	kb := clientCtx.Keyring
+	multisigRecord, err := kb.Key(name)
+	if err != nil {
+		return nil, errorsmod.Wrap(err, "error getting keybase multisig account")
+	}
+
+	return multisigRecord, nil
 }

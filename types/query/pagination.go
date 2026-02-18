@@ -1,8 +1,7 @@
 package query
 
 import (
-	"errors"
-	"math"
+	"fmt"
 
 	db "github.com/cosmos/cosmos-db"
 	"google.golang.org/grpc/codes"
@@ -16,19 +15,11 @@ import (
 const DefaultPage = 1
 
 // DefaultLimit is the default `limit` for queries
-// if the `limit` is not supplied, paginate will use `DefaultLimit`
+// if the `limit` is not supplied or exceeds the maximum
+// allowed value, paginate will use `DefaultLimit`
 const DefaultLimit = 100
 
-// PaginationMaxLimit is the maximum limit the paginate function can handle
-// which equals the maximum value that can be stored in uint64
-var PaginationMaxLimit uint64 = math.MaxUint64
-
-// ParsePagination validate PageRequest and returns page number & limit.
-// Note: cometBFT enforces a maximum query limit of 100 to avoid node overload.
-// Queries above this limit will return the first 100 items.
-// To retrieve subsequent pages, use an offset equal to the
-// total number of results retrieved so far. For example, if you have retrieved 100 results and want to
-// retrieve the next set of results, set the offset to 100 and the appropriate limit.
+// ParsePagination validates PageRequest and returns page number & limit.
 func ParsePagination(pageReq *PageRequest) (page, limit int, err error) {
 	offset := 0
 	limit = DefaultLimit
@@ -62,7 +53,7 @@ func Paginate(
 	pageRequest = initPageRequestDefaults(pageRequest)
 
 	if pageRequest.Offset > 0 && pageRequest.Key != nil {
-		return nil, errors.New("invalid request, either offset or key is expected, got both")
+		return nil, fmt.Errorf("invalid request, either offset or key is expected, got both")
 	}
 
 	iterator := getIterator(prefixStore, pageRequest.Key, pageRequest.Reverse)
